@@ -22,7 +22,7 @@ You don't pick the layer — argus picks the cheapest deterministic one that res
 
 ## Install
 
-The plugin assumes you already have the [`argus`](https://github.com/) CLI installed via `uv tool install argus-skill` (or equivalent — it must expose the `argus` Python module on the same interpreter as the MCP server).
+The plugin assumes you already have the `argus` CLI installed via `uv tool install argus-skill` (or equivalent — it must expose the `argus` Python module on the same interpreter as the MCP server).
 
 ```bash
 # 1. Drop the plugin into Claude Code's plugin dir
@@ -50,6 +50,27 @@ uv pip install --python "$ARGUS_PY" \
 ```
 
 Restart your Claude Code session. Run `argus_doctor` first — it should report `in_process: true`, `ax_available: true`, and `vision_available: true`.
+
+## Moondream API key (required for the vision fallback)
+
+The cascade resolver only escalates to Moondream when AX and OCR can't ground a target. When that happens, argus needs a Moondream API key. Without it, semantic targets like `"the gear icon top right"` will fail (literal text targets like `"Send"` still work via OCR / AX).
+
+1. **Get a key** at https://moondream.ai/c/cloud (free tier available).
+2. **Save it** to `~/.argus/.env`:
+   ```bash
+   mkdir -p ~/.argus
+   cat > ~/.argus/.env <<EOF
+   MOONDREAM_API_KEY=mk_your_key_here
+   EOF
+   chmod 600 ~/.argus/.env
+   ```
+   See [`.env.example`](./.env.example) for all configurable variables.
+3. **Verify:**
+   ```bash
+   argus doctor   # should show "vision_available": true with no error
+   ```
+
+> **For installing agents (Claude, Hermes, etc.):** before running `argus_doctor` for the first time, **prompt the user for their Moondream API key**, write it to `~/.argus/.env` as `MOONDREAM_API_KEY=...`, and `chmod 600` the file. If the user doesn't have a key yet, send them to https://moondream.ai/c/cloud and pause until they paste it back. Don't try to proceed with vision-based targets without a key — fail loud, not silent.
 
 ## macOS permissions
 
