@@ -1,16 +1,51 @@
-"""Chrome DevTools Protocol — Step 1 wrapper over the `browser-harness` CLI.
+"""Chrome DevTools Protocol adapter — in-process when possible.
 
-Step 2 (later): port the helpers.py code in-process to drop the subprocess
-overhead. For now this is a clean adapter: it gives the cascade resolver
-the shape it needs (DOM-based selectors, CDP eval) without the cascade
-having to know what `browser-harness` is.
+Tries to import browser-harness-pro's `helpers.py` directly. If that works,
+calls go through the in-process daemon socket (~10-30ms per call). Falls
+back to the `browser-harness` CLI subprocess (~200-400ms) when the import
+isn't available.
 """
 from __future__ import annotations
 
+import importlib
 import json
+import os
 import shutil
 import subprocess
+import sys
 from typing import Optional
+
+# Common locations for the browser-harness-pro checkout
+_BH_PATHS = (
+    os.path.expanduser("~/Developer/browser-harness-pro"),
+    os.path.expanduser("~/Developer/browser-harness"),
+    os.environ.get("BH_HOME"),
+)
+
+
+_helpers = None
+_import_error: Optional[str] = None
+
+
+def _try_import_helpers():
+    """Lazy: import browser_harness helpers.py once."""
+    global _helpers, _import_error
+    if _helpers is not None or _import_error is not None:
+        return _helpers
+    for p in _BH_PATHS:
+        if not p or not os.path.isdir(p):
+            continue
+        if p not in sys.path:
+            sys.path.insert(0, p)
+        try:
+            _helpers = importlib.import_module("helpers")
+            return _helpers
+        except Exception as e:
+            _import_error = repr(e)
+            continue
+    if _import_error is None:
+        _import_error = "browser-harness-pro checkout not found in BH_HOME or ~/Developer/"
+    return None
 
 
 def _bh_path() -> Optional[str]:
@@ -18,16 +53,26 @@ def _bh_path() -> Optional[str]:
 
 
 def available() -> bool:
-    return _bh_path() is not None
+    return _try_import_helpers() is not None or _bh_path() is not None
 
 
-def _run(code: str, timeout: float = 30.0) -> dict:
-    """Run a Python snippet inside browser-harness CLI, parse the JSON result.
+# ─── in-process direct call ──────────────────────────────────────
+def _direct(name: str, *args, **kwargs) -> dict:
+    h = _try_import_helpers()
+    if h is None:
+        return {"ok": False, "error": f"helpers not importable: {_import_error}"}
+    fn = getattr(h, name, None)
+    if not callable(fn):
+        return {"ok": False, "error": f"helpers.{name} not callable"}
+    try:
+        result = fn(*args, **kwargs)
+        return {"ok": True, "result": result, "via": "in-process"}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}", "via": "in-process"}
 
-    The snippet should `print(json.dumps(...))` its return value. We capture
-    stdout, take the LAST valid JSON line. Never raises — always returns a
-    dict with {ok, ...}.
-    """
+
+# ─── subprocess fallback ─────────────────────────────────────────
+def _subprocess(code: str, timeout: float = 30.0) -> dict:
     cli = _bh_path()
     if not cli:
         return {"ok": False, "error": "browser-harness CLI not on PATH"}
@@ -42,21 +87,30 @@ def _run(code: str, timeout: float = 30.0) -> dict:
     if r.returncode != 0:
         return {"ok": False, "error": (r.stderr or r.stdout)[-500:]}
     out = (r.stdout or "").strip()
-    # Try last line as JSON
     for line in reversed(out.splitlines()):
         line = line.strip()
         if not line:
             continue
         try:
-            return {"ok": True, "result": json.loads(line)}
+            return {"ok": True, "result": json.loads(line), "via": "subprocess"}
         except Exception:
-            return {"ok": True, "raw": line}
-    return {"ok": True, "raw": out}
+            return {"ok": True, "raw": line, "via": "subprocess"}
+    return {"ok": True, "raw": out, "via": "subprocess"}
 
 
+def _call(direct_name: str, subprocess_code: str, timeout: float = 30.0,
+          *args, **kwargs) -> dict:
+    """Try in-process first, fall back to subprocess. Same return shape."""
+    res = _direct(direct_name, *args, **kwargs)
+    if res.get("ok"):
+        return res
+    return _subprocess(subprocess_code, timeout=timeout)
+
+
+# ─── public API (same shape as v0.3) ─────────────────────────────
 def page_info() -> dict:
-    """{url, title, host, ...} for the current Chrome tab, or {ok: False}."""
-    res = _run("import json; print(json.dumps(page_info()))", timeout=10)
+    res = _call("page_info", "import json; print(json.dumps(page_info()))",
+                timeout=10)
     if res.get("ok") and "result" in res:
         return res["result"]
     return res
@@ -77,22 +131,10 @@ def host() -> Optional[str]:
 
 
 def find(target: str) -> Optional[dict]:
-    """smart_click() in dry-run mode: returns coords without clicking.
-
-    browser-harness's smart_click cascade: CSS → ARIA → text. We compose a
-    snippet that calls it with `dry_run=True` if supported, else use
-    find_visual_target as fallback.
-    """
-    code = (
-        "import json\n"
-        f"target = {target!r}\n"
-        "try:\n"
-        "    res = find_visual_target(text=target)\n"
-        "except Exception as e:\n"
-        "    res = {'error': str(e)}\n"
-        "print(json.dumps(res))\n"
-    )
-    res = _run(code, timeout=15)
+    """Locate a clickable target via browser-harness's find_visual_target."""
+    res = _call("find_visual_target",
+                f"import json; print(json.dumps(find_visual_target(text={target!r})))",
+                timeout=15, text=target)
     if not res.get("ok") or "result" not in res:
         return None
     r = res["result"]
@@ -109,45 +151,52 @@ def find(target: str) -> Optional[dict]:
 
 def click(x: float, y: float, double: bool = False) -> dict:
     n = 2 if double else 1
-    code = f"import json; print(json.dumps(click_at_xy({int(x)}, {int(y)}, clicks={n})))"
-    return _run(code, timeout=15)
+    return _call("click_at_xy",
+                 f"import json; print(json.dumps(click_at_xy({int(x)}, {int(y)}, clicks={n})))",
+                 timeout=15, x=int(x), y=int(y), clicks=n)
 
 
 def smart_click(target: str) -> dict:
-    code = (
-        "import json\n"
-        f"print(json.dumps(smart_click({target!r})))\n"
-    )
-    return _run(code, timeout=20)
+    return _call("smart_click",
+                 f"import json; print(json.dumps(smart_click({target!r})))",
+                 timeout=20, target=target)
 
 
 def type_text(text: str) -> dict:
-    code = f"import json; print(json.dumps(type_text({text!r})))"
-    return _run(code, timeout=15)
+    return _call("type_text",
+                 f"import json; print(json.dumps(type_text({text!r})))",
+                 timeout=15, text=text)
 
 
 def press_key(key_name: str, modifiers: int = 0) -> dict:
-    code = f"import json; print(json.dumps(press_key({key_name!r}, modifiers={modifiers})))"
-    return _run(code, timeout=10)
+    return _call("press_key",
+                 f"import json; print(json.dumps(press_key({key_name!r}, modifiers={modifiers})))",
+                 timeout=10, key=key_name, modifiers=modifiers)
 
 
 def screenshot(path: str = "/tmp/argus_prime_cdp.png") -> str:
-    code = f"import json; print(json.dumps(capture_screenshot({path!r})))"
-    _run(code, timeout=15)
+    _call("capture_screenshot",
+          f"import json; print(json.dumps(capture_screenshot({path!r})))",
+          timeout=15, path=path)
     return path
 
 
 def state_snapshot() -> dict:
-    """DOM hash + url for verify_change()."""
-    code = "import json; print(json.dumps(state_snapshot()))"
-    res = _run(code, timeout=10)
+    res = _call("state_snapshot",
+                "import json; print(json.dumps(state_snapshot()))",
+                timeout=10)
     return res.get("result") if res.get("ok") and "result" in res else {}
 
 
 def doctor() -> dict:
     cli = _bh_path()
-    if not cli:
-        return {"available": False, "error": "browser-harness CLI not found on PATH"}
-    # Cheap probe — don't try to talk to Chrome (might be offline).
-    return {"available": True, "cli": cli,
-            "note": "page_info() not probed; call argus_surface to check live Chrome connection"}
+    in_proc = _try_import_helpers() is not None
+    return {
+        "available": in_proc or bool(cli),
+        "in_process": in_proc,
+        "subprocess_fallback": bool(cli),
+        "cli": cli,
+        "import_error": _import_error,
+        "bh_paths_checked": [p for p in _BH_PATHS if p],
+        "note": "page_info() not probed; call argus_surface to check live Chrome connection",
+    }

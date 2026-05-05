@@ -114,8 +114,12 @@ def _conn() -> sqlite3.Connection:
     return c
 
 
+CACHE_TTL_DAYS = float(os.environ.get("ARGUS_CACHE_TTL_DAYS", "90"))
+
+
 def cache_lookup(scope: str, target: str) -> Optional[dict]:
-    """Return cached selector or None. Skips entries with bad failure/success ratio."""
+    """Return cached selector or None. Skips entries with bad failure/success
+    ratio or older than CACHE_TTL_DAYS (UI changes — force re-cascade)."""
     if not scope or not target:
         return None
     with _CACHE_LOCK:
@@ -133,6 +137,10 @@ def cache_lookup(scope: str, target: str) -> Optional[dict]:
     source, selector, confidence, succ, fail, last_succ = row
     if succ + fail >= 3 and succ / max(succ + fail, 1) < 0.4:
         return None  # poisoned entry, force re-cascade
+    if last_succ and CACHE_TTL_DAYS > 0:
+        age_days = (time.time() - float(last_succ)) / 86400.0
+        if age_days > CACHE_TTL_DAYS:
+            return None  # stale, re-validate via cascade
     return {"source": source, "selector": selector, "confidence": confidence,
             "successes": succ, "failures": fail, "last_success": last_succ,
             "from_cache": True}

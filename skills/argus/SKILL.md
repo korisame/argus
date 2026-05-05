@@ -40,7 +40,7 @@ You don't pick the layer — `argus_click` and `argus_find` route by surface
 and target shape. Result includes `source` and `attempts` so you see exactly
 what grounded the click.
 
-## Tools (17 total, 10 atomic)
+## Tools (20 total, 10 atomic)
 
 **Atoms — these cover 90% of usage:**
 
@@ -66,6 +66,7 @@ what grounded the click.
 | `argus_history` | Tail intent.jsonl with filters |
 | `argus_metrics` | Per-tool latency + success rate |
 | `argus_cache` | Inspect learned-selector cache |
+| `argus_autotune` | Promote proven cache entries → app-skills/, surface recurring failures |
 | `argus_session_begin` / `argus_session_end` / `argus_vision_unload` | Moondream RAM control |
 
 ## Click semantics
@@ -126,6 +127,32 @@ skips the cascade and replays the cached selector. Failures degrade the
 entry's success rate; entries with <40% success after 3+ tries are bypassed.
 
 Inspect: `argus_cache` (optionally `scope="web:github.com"`).
+
+## Autotune (cache → app-skill promotion)
+
+`argus_autotune` does two things:
+
+1. **Promotion**: cache entries with ≥20 successes and ≥90% success rate get
+   appended to the matching `app-skills/<scope>.md` file inside an
+   `<!-- argus-autotune:start -->` ... `<!-- argus-autotune:end -->` block
+   (overwritten in place; manual additions outside the block are preserved).
+   This makes the agent see the learned selector at skill-load time, not
+   just at cache-hit time — speeding up cold sessions.
+2. **Failure report**: groups recurring failures by `(scope, target)` from
+   recent intent log entries. High-count pairs are the targets argus keeps
+   missing — usually a hint that `app-skills/<scope>.md` needs a new pattern,
+   keyboard shortcut, or AppleScript escape hatch.
+
+Run on demand:
+
+```
+argus_autotune action="full"          # both, write to disk
+argus_autotune action="full" dry_run=true
+argus_autotune action="report"        # only show failures
+argus_autotune action="promote"       # only promote successes
+```
+
+Run nightly via launchd / cron for hands-off improvement.
 
 ## Security guardrails
 
