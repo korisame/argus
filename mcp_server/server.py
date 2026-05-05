@@ -56,12 +56,15 @@ def _load_dotenv() -> dict:
 
 _DOTENV_INFO = _load_dotenv()
 
-from core import cascade, intent, router, vision, verify, session, repl, autotune
-from adapters import ax, ocr, cdp, cgevent
+from core import (cascade, intent, router, vision, verify, session, repl,
+                  autotune, screen, patterns, policy, prewarm, dashboard,
+                  wizard, uninstall as _uninstall, chrome_admin, registry,
+                  asyncio_runtime)
+from adapters import ax, ocr, cdp, cdp_raw, cgevent
 
 PROTO_VERSION = "2024-11-05"
 SERVER_NAME = "argus"
-SERVER_VERSION = "0.4.0"
+SERVER_VERSION = "0.5.0"
 
 
 # ─── tool catalog ─────────────────────────────────────────────────────
@@ -231,6 +234,93 @@ TOOLS = [
     {"name": "argus_vision_unload",
      "description": "Free the Moondream model RAM right now.",
      "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
+
+    # ─── v0.5 additions ───────────────────────────────────────────
+    {"name": "argus_window",
+     "description": "Capture a specific app window — foreground or background. Returns base64 PNG. Match by app name, bundle_id, or window title. Doesn't bring the app to front.",
+     "inputSchema": {"type": "object", "properties": {
+         "app": {"type": "string", "description": "partial case-insensitive owner name"},
+         "bundle_id": {"type": "string"},
+         "title": {"type": "string", "description": "substring of window title"},
+         "index": {"type": "integer", "default": 0},
+         "max_dim": {"type": "integer", "default": 1600},
+         "frontmost": {"type": "boolean", "default": False,
+                        "description": "If true, capture frontmost app's main window."}
+     }, "additionalProperties": False}},
+
+    {"name": "argus_window_list",
+     "description": "List all visible windows with metadata (wid, app, title, bounds, layer).",
+     "inputSchema": {"type": "object", "properties": {
+         "app": {"type": "string", "description": "filter by app name"}
+     }, "additionalProperties": False}},
+
+    {"name": "argus_pattern",
+     "description": "Task-pattern memory. action ∈ {record_begin, record_step, record_end, lookup, list, delete}. record_begin(name, scope, intent_label) starts a recording; subsequent argus_click/type/etc append; record_end commits. lookup(scope, intent_label) returns the saved sequence for replay.",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string", "enum": ["record_begin", "record_step", "record_end",
+                                                 "lookup", "list", "delete"]},
+         "name": {"type": "string"},
+         "scope": {"type": "string"},
+         "intent_label": {"type": "string"},
+         "op": {"type": "string"},
+         "args": {"type": "object", "additionalProperties": True},
+         "ok": {"type": "boolean", "default": True},
+         "save": {"type": "boolean", "default": True},
+         "limit": {"type": "integer", "default": 100}
+     }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_policy",
+     "description": "Inspect / write the policy file (~/.argus/policy.yaml). action ∈ {doctor, write_default, reload, check_app, check_destructive}.",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string", "enum": ["doctor", "write_default",
+                                                 "reload", "check_app", "check_destructive"]},
+         "scope": {"type": "string"},
+         "target": {"type": "string"}
+     }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_setup",
+     "description": "Onboarding wizard — checks Python, uv, argus CLI, pyobjc, websocket-client, browser-harness, automation Chrome, Moondream key, policy file, Screen Recording TCC. Returns step results + suggested fix commands.",
+     "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
+
+    {"name": "argus_uninstall",
+     "description": "Clean removal across all integration points. action ∈ {plan, execute}. plan dry-runs, execute removes ~/.claude/plugins/argus, ~/.codex/skills/argus, ~/.openclaw/skills/argus, ~/.argus-prime, ~/.argus, launchd agent, BU_CDP_URL from zshrc. force_full also removes ~/Developer/argus.",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string", "enum": ["plan", "execute"], "default": "plan"},
+         "force_full": {"type": "boolean", "default": False},
+         "kill_chrome": {"type": "boolean", "default": True}
+     }, "additionalProperties": False}},
+
+    {"name": "argus_dashboard",
+     "description": "Local web dashboard on http://127.0.0.1:9999 — cache view, intent log, metrics, patterns, autotune. action ∈ {start, stop, status}.",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string", "enum": ["start", "stop", "status"], "default": "start"},
+         "port": {"type": "integer", "default": 9999}
+     }, "additionalProperties": False}},
+
+    {"name": "argus_chrome",
+     "description": "Manage the dedicated automation Chrome (port 9333). action ∈ {status, boot, kill, install_agent}. boot supports headless=true.",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string", "enum": ["status", "boot", "kill", "install_agent"]},
+         "headless": {"type": "boolean", "default": False}
+     }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_skills",
+     "description": "Pull app-skills from the community registry (default: korisame/argus-skills). action ∈ {index, install, list_local}. install accepts 'github.com', 'com.apple.finder', 'web/foo.com', or 'native/com.foo'.",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string", "enum": ["index", "install", "list_local"]},
+         "name": {"type": "string"},
+         "kind": {"type": "string", "enum": ["auto", "native", "web"], "default": "auto"}
+     }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_cu_route",
+     "description": "Computer Use shim. Translates Anthropic Computer-Use-style {action, coordinate, text, ...} payloads into native argus tools. Lets agents that 'know how to' use Computer Use drive argus instead. action examples: 'screenshot', 'left_click', 'type', 'key', 'scroll', 'mouse_move'.",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string"},
+         "coordinate": {"type": "array", "items": {"type": "number"},
+                          "minItems": 2, "maxItems": 2},
+         "text": {"type": "string"},
+         "duration": {"type": "number"}
+     }, "required": ["action"], "additionalProperties": True}},
 ]
 
 
@@ -328,6 +418,23 @@ def tool_argus_click(args):
     do_verify = bool(args.get("verify", True))
     min_conf = float(args.get("min_confidence", 0.55))
 
+    # ── policy gate ──
+    surf = router.detect()
+    scope = surf.get("scope") or ""
+    allowed, reason = policy.app_allowed(scope)
+    if not allowed:
+        intent.log("argus.click", scope=scope, target=target, outcome="blocked",
+                   error=reason)
+        return _text({"clicked": False, "blocked_by_policy": reason})
+    destructive = policy.is_destructive(target)
+    if destructive and not args.get("confirm_destructive"):
+        intent.log("argus.click", scope=scope, target=target, outcome="needs_confirm",
+                   observation={"matched_verb": destructive})
+        return _text({"clicked": False,
+                      "needs_confirm": f"target matches destructive verb {destructive!r}. "
+                                        f"Re-call with confirm_destructive=true to proceed.",
+                      "matched_verb": destructive})
+
     res = cascade.resolve(target, screenshot_callable=_take_screenshot,
                           min_confidence=min_conf)
     if res.get("source") is None:
@@ -361,24 +468,36 @@ def tool_argus_click(args):
                source=res.get("source"), outcome="ok" if ok else "fail",
                ms=res.get("ms", 0), confidence=res.get("confidence"),
                observation={"verified": out.get("verified")})
+    if ok:
+        patterns.record_step("click", {"target": target, "double": double})
     return _text(out)
 
 
 def tool_argus_type(args):
     text = args["text"]
     force = bool(args.get("force_secure", False))
-    if not force and ax.available() and ax.is_secure_field_focused():
+    pol = policy.load()
+    surf = router.detect()
+    scope = surf.get("scope") or ""
+    type_ok, reason = policy.type_allowed(scope)
+    if not type_ok:
+        intent.log("argus.type", scope=scope, outcome="blocked", error=reason)
+        return _text({"typed": False, "blocked_by_policy": reason})
+    if not force and pol.get("block_secure_field", True) and ax.available() \
+            and ax.is_secure_field_focused():
         return _text({"typed": False,
                       "blocked": "AXSecureTextField focused. Pass force_secure=true to override."})
     res = cgevent.type_text(text)
-    intent.log("argus.type", outcome="ok",
+    intent.log("argus.type", outcome="ok", scope=scope,
                observation={"chars": len(text)})
+    patterns.record_step("type", {"text": text})
     return _text({"typed": True, "chars": len(text), "result": res})
 
 
 def tool_argus_key(args):
     res = cgevent.key(args["name"], modifiers=args.get("modifiers"))
     intent.log("argus.key", target=args["name"], outcome="ok")
+    patterns.record_step("key", {"name": args["name"], "modifiers": args.get("modifiers")})
     return _text({"pressed": args["name"], "modifiers": args.get("modifiers"),
                   "result": res})
 
@@ -413,6 +532,7 @@ def tool_argus_paste(args):
         except Exception:
             pass
     intent.log("argus.paste", outcome="ok", observation={"chars": len(text)})
+    patterns.record_step("paste", {"text": text[:200] + ("..." if len(text) > 200 else "")})
     return _text({"pasted": True, "chars": len(text), "restored_clipboard": restore})
 
 
@@ -508,6 +628,7 @@ def tool_argus_send_keys(args):
     mods = "+".join(parts[:-1]) if len(parts) > 1 else None
     res = cgevent.key(key_name, modifiers=mods)
     intent.log("argus.send_keys", target=combo, outcome="ok")
+    patterns.record_step("send_keys", {"combo": combo})
     return _text({"pressed": key_name, "modifiers": mods, "combo": combo, "result": res})
 
 
@@ -519,12 +640,16 @@ def tool_argus_scroll(args):
                          amount=int(args.get("amount", 5)),
                          coords=coords)
     intent.log("argus.scroll", target=args["direction"], outcome="ok")
+    patterns.record_step("scroll", {"direction": args["direction"],
+                                     "amount": int(args.get("amount", 5))})
     return _text({"scrolled": args["direction"], "result": res})
 
 
 def tool_argus_open_app(args):
     res = cgevent.open_app(args["name"])
     intent.log("argus.open_app", target=args["name"], outcome="ok")
+    patterns.record_step("open_app", {"name": args["name"]})
+    prewarm.kick(args["name"])  # background OCR prewarm
     return _text(res)
 
 
@@ -617,6 +742,174 @@ def tool_argus_vision_unload(_):
     return _text({"unloaded": True})
 
 
+# ─── v0.5 handlers ─────────────────────────────────────────────────
+def tool_argus_window(args):
+    if args.get("frontmost"):
+        res = screen.capture_frontmost()
+    else:
+        res = screen.capture_window(
+            app=args.get("app"), bundle_id=args.get("bundle_id"),
+            title=args.get("title"), index=int(args.get("index", 0)),
+        )
+    if not res.get("ok"):
+        return _text(res)
+    path = res["path"]
+    max_dim = int(args.get("max_dim", 1600))
+    try:
+        from PIL import Image
+        img = Image.open(path)
+        if max(img.size) > max_dim:
+            img.thumbnail((max_dim, max_dim))
+            import tempfile as _tf
+            path = _tf.NamedTemporaryFile(suffix=".png", delete=False).name
+            img.save(path)
+    except Exception:
+        pass
+    with open(path, "rb") as f:
+        b = f.read()
+    return [
+        {"type": "image", "data": base64.b64encode(b).decode(), "mimeType": "image/png"},
+        {"type": "text", "text": json.dumps({"window": res.get("window"), "path": path}, default=str)},
+    ]
+
+
+def tool_argus_window_list(args):
+    wins = screen.list_windows()
+    if args.get("app"):
+        n = args["app"].lower()
+        wins = [w for w in wins if n in (w["owner"] or "").lower()]
+    return _text({"count": len(wins), "windows": wins})
+
+
+def tool_argus_pattern(args):
+    action = args["action"]
+    if action == "record_begin":
+        return _text(patterns.record_begin(args["name"], args["scope"], args["intent_label"]))
+    if action == "record_step":
+        n = patterns.record_step(args["op"], args.get("args") or {},
+                                  expect_verify=args.get("expect_verify", "ok"))
+        return _text({"ok": True, "active_recordings_updated": n})
+    if action == "record_end":
+        return _text(patterns.record_end(args["name"], ok=bool(args.get("ok", True)),
+                                          save=bool(args.get("save", True))))
+    if action == "lookup":
+        hit = patterns.lookup(args["scope"], args["intent_label"])
+        return _text(hit or {"hit": False})
+    if action == "list":
+        return _text({"patterns": patterns.list_patterns(scope=args.get("scope"),
+                                                          limit=int(args.get("limit", 100)))})
+    if action == "delete":
+        return _text(patterns.delete_pattern(args["scope"], args["intent_label"]))
+    return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_policy(args):
+    action = args["action"]
+    if action == "doctor":           return _text(policy.doctor())
+    if action == "write_default":    return _text(policy.write_default_policy())
+    if action == "reload":           return _text({"loaded": list(policy.load(force=True).keys())})
+    if action == "check_app":        return _text({"scope": args.get("scope"),
+                                                     "result": policy.app_allowed(args.get("scope", ""))})
+    if action == "check_destructive":
+        v = policy.is_destructive(args.get("target", ""))
+        return _text({"target": args.get("target"), "destructive": bool(v),
+                       "matched_verb": v})
+    return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_setup(_):
+    return _text(wizard.run())
+
+
+def tool_argus_uninstall(args):
+    action = args.get("action", "plan")
+    if action == "plan":
+        return _text(_uninstall.plan())
+    if action == "execute":
+        return _text(_uninstall.execute(force_full=bool(args.get("force_full", False)),
+                                         kill_chrome=bool(args.get("kill_chrome", True))))
+    return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_dashboard(args):
+    action = args.get("action", "start")
+    if action == "start":   return _text(dashboard.start(port=int(args.get("port", 9999))))
+    if action == "stop":    return _text(dashboard.stop())
+    if action == "status":  return _text(dashboard.status())
+    return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_chrome(args):
+    action = args["action"]
+    if action == "status":         return _text(chrome_admin.status())
+    if action == "boot":           return _text(chrome_admin.boot(headless=bool(args.get("headless", False))))
+    if action == "kill":           return _text(chrome_admin.kill())
+    if action == "install_agent":  return _text(chrome_admin.install_agent())
+    return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_skills(args):
+    action = args["action"]
+    if action == "index":      return _text(registry.index())
+    if action == "list_local": return _text(registry.list_local())
+    if action == "install":
+        if not args.get("name"):
+            return _text({"error": "name required"})
+        return _text(registry.install(args["name"], kind=args.get("kind", "auto")))
+    return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_cu_route(args):
+    """Computer Use shim. Translates CU-style payloads to native argus calls."""
+    action = (args.get("action") or "").lower().replace("-", "_")
+    coord = args.get("coordinate")
+    text = args.get("text")
+
+    # Map Anthropic's Computer Use action names → argus
+    if action in ("screenshot", "screen_shot"):
+        return tool_argus_see({"max_dim": 1600})
+    if action in ("left_click", "click", "mouse_click"):
+        if coord and len(coord) == 2:
+            return tool_argus_click({"target": f"{int(coord[0])},{int(coord[1])}"})
+        if text:  # text = visual target description
+            return tool_argus_click({"target": text})
+        return _text({"error": "left_click needs coordinate or text"})
+    if action == "double_click":
+        if coord and len(coord) == 2:
+            return tool_argus_click({"target": f"{int(coord[0])},{int(coord[1])}", "double": True})
+        if text:
+            return tool_argus_click({"target": text, "double": True})
+        return _text({"error": "double_click needs coordinate or text"})
+    if action in ("right_click", "middle_click"):
+        return _text({"error": f"{action} not yet supported by argus shim"})
+    if action == "mouse_move":
+        return _text({"ok": True, "noop": True,
+                       "note": "argus doesn't track cursor; targets are resolved per-click"})
+    if action in ("type", "type_text"):
+        if not text:
+            return _text({"error": "type needs text"})
+        # use paste route for performance on long strings
+        return tool_argus_paste({"text": text}) if len(text) > 80 \
+               else tool_argus_type({"text": text})
+    if action in ("key", "key_press"):
+        if not text:
+            return _text({"error": "key needs text"})
+        return tool_argus_send_keys({"combo": text})
+    if action == "scroll":
+        direction = "down"
+        if coord and len(coord) == 2:
+            dy = coord[1]
+            direction = "up" if dy < 0 else "down"
+        return tool_argus_scroll({"direction": direction,
+                                   "amount": int(args.get("duration", 5))})
+    if action in ("cursor_position", "wait"):
+        return _text({"ok": True, "noop": True, "action": action})
+    return _text({"error": f"unsupported CU action: {action}",
+                  "supported": ["screenshot", "left_click", "double_click",
+                                 "type", "key", "scroll", "mouse_move",
+                                 "wait", "cursor_position"]})
+
+
 HANDLERS = {t["name"]: globals()[f"tool_{t['name']}"] for t in TOOLS}
 
 
@@ -631,7 +924,8 @@ def _err(rid, code, msg): _send({"jsonrpc": "2.0", "id": rid,
                                  "error": {"code": code, "message": msg}})
 
 
-def main():
+def _main_sync():
+    """Legacy synchronous dispatch loop (kept for tests + emergency fallback)."""
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -678,6 +972,21 @@ def main():
                 _err(rid, -32601, f"method not implemented: {method}")
         except Exception as e:
             _err(rid, -32603, f"internal: {e}")
+
+
+def main():
+    # asyncio dispatch by default; ARGUS_ASYNC=0 forces the legacy sync loop.
+    use_async = os.environ.get("ARGUS_ASYNC", "1") != "0"
+    if use_async:
+        try:
+            asyncio_runtime.run(HANDLERS, TOOLS,
+                                proto=PROTO_VERSION, name=SERVER_NAME, version=SERVER_VERSION,
+                                metrics_record=intent.metrics_record)
+            return
+        except Exception:
+            # Fall back to sync if asyncio fails to start (rare)
+            pass
+    _main_sync()
 
 
 if __name__ == "__main__":

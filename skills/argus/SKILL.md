@@ -40,7 +40,7 @@ You don't pick the layer — `argus_click` and `argus_find` route by surface
 and target shape. Result includes `source` and `attempts` so you see exactly
 what grounded the click.
 
-## Tools (20 total, 10 atomic)
+## Tools (34 total, 12 atomic)
 
 **Atoms — these cover 90% of usage:**
 
@@ -68,6 +68,21 @@ what grounded the click.
 | `argus_cache` | Inspect learned-selector cache |
 | `argus_autotune` | Promote proven cache entries → app-skills/, surface recurring failures |
 | `argus_session_begin` / `argus_session_end` / `argus_vision_unload` | Moondream RAM control |
+
+**v0.5 additions (workspace + admin + safety):**
+
+| Tool | What |
+|---|---|
+| `argus_window` | Capture a specific app window — foreground or background. No focus stealing |
+| `argus_window_list` | List all visible windows with metadata |
+| `argus_pattern` | Task-pattern memory — record / lookup / replay sequences keyed by (scope, intent) |
+| `argus_policy` | Inspect/edit `~/.argus/policy.yaml` — denylists + destructive-verb confirm |
+| `argus_setup` | Onboarding wizard — checks deps, prompts for missing pieces |
+| `argus_uninstall` | Clean removal across all integration points |
+| `argus_dashboard` | Local web dashboard at http://127.0.0.1:9999 |
+| `argus_chrome` | Manage the dedicated automation Chrome (boot / kill / install_agent / headless) |
+| `argus_skills` | Pull community app-skills from korisame/argus-skills registry |
+| `argus_cu_route` | **Computer Use shim** — translate Anthropic CU calls into argus equivalents |
 
 ## Click semantics
 
