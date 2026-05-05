@@ -25,13 +25,20 @@ def _run(code: str, timeout: float = 30.0) -> dict:
     """Run a Python snippet inside browser-harness CLI, parse the JSON result.
 
     The snippet should `print(json.dumps(...))` its return value. We capture
-    stdout, take the LAST valid JSON line.
+    stdout, take the LAST valid JSON line. Never raises — always returns a
+    dict with {ok, ...}.
     """
     cli = _bh_path()
     if not cli:
         return {"ok": False, "error": "browser-harness CLI not on PATH"}
-    r = subprocess.run([cli, "-c", code], capture_output=True,
-                       text=True, timeout=timeout)
+    try:
+        r = subprocess.run([cli, "-c", code], capture_output=True,
+                           text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": f"browser-harness timed out after {timeout}s "
+                                       "(Chrome not running or no debug port?)"}
+    except Exception as e:
+        return {"ok": False, "error": f"browser-harness invocation failed: {e}"}
     if r.returncode != 0:
         return {"ok": False, "error": (r.stderr or r.stdout)[-500:]}
     out = (r.stdout or "").strip()
@@ -141,5 +148,6 @@ def doctor() -> dict:
     cli = _bh_path()
     if not cli:
         return {"available": False, "error": "browser-harness CLI not found on PATH"}
-    info = page_info()
-    return {"available": True, "cli": cli, "page": info}
+    # Cheap probe — don't try to talk to Chrome (might be offline).
+    return {"available": True, "cli": cli,
+            "note": "page_info() not probed; call argus_surface to check live Chrome connection"}
