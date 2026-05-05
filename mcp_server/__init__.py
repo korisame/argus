@@ -1,1 +1,1 @@
-# argus mcp_server package
+# argus-prime MCP server

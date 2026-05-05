@@ -1,8 +1,8 @@
 {
   "name": "argus",
-  "version": "0.2.0",
-  "description": "Vision-grounded computer automation with hybrid AX + OCR + Moondream routing, in-process daemon, self-verifying actions, and per-app skills. Drives browser, native macOS apps, and anything visible on screen.",
-  "author": {"name": "Shaun"},
-  "keywords": ["automation", "vision", "macos", "browser", "computer-use", "accessibility", "ocr"],
+  "version": "0.3.0",
+  "description": "Vision-grounded computer automation for macOS. Single unified resolver across browser (CDP), native apps (AX), and webviews — with cache-driven learned selectors, self-verifying actions, persistent REPL, and per-app/per-host skills.",
+  "author": {"name": "Shaun Gioele"},
+  "keywords": ["automation", "vision", "macos", "browser", "computer-use", "accessibility", "ocr", "mcp"],
   "license": "Apache-2.0"
 }

@@ -1,17 +1,33 @@
 # app-skills
 
-Per-app knowledge files. Loaded by argus when an app becomes frontmost
-(matching by `bundle_id` in front-matter, falling back to filename).
+Per-context knowledge files. Argus loads the matching one when an app/host
+becomes the current scope.
 
-Add a new file when you discover a non-obvious pattern for an app —
-keyboard shortcut, AppleScript that beats vision, an icon that
-Moondream consistently misidentifies, etc.
+## Layout
 
-Format:
+```
+app-skills/
+├── native/<bundle.id>.md       e.g. com.apple.finder.md
+└── web/<host>.md                e.g. github.com.md
+```
+
+`<bundle.id>` matches what `argus_surface` returns under `app.bundle_id` for
+native apps. `<host>` matches `host` for browser scope (`web:<host>`).
+
+## When to add a new file
+
+When you discover a non-obvious pattern for an app/site:
+- a keyboard shortcut that beats UI clicks
+- an icon that Moondream consistently misidentifies
+- a stable AppleScript / API path that replaces UI driving
+- an auth/session quirk worth documenting
+
+## Format
+
 ```
 ---
-bundle_id: com.foo.bar
-name: Foo
+bundle_id: com.foo.bar      # native only
+host: foo.com               # web only
 ---
 
 # Foo
@@ -19,9 +35,14 @@ name: Foo
 ## Surface
 ...
 
-## Common operations
+## Common operations / Selectors
 ...
 
-## Quirks / Don't
+## Don't
 ...
 ```
+
+## Pre-shipped
+
+**Native:** Finder, Mail, Preview/Anteprima, Excel, System Settings.
+**Web:** github.com, mail.google.com, www.notion.so, linear.app.

@@ -1,142 +1,167 @@
 ---
 name: argus
-description: Vision-grounded computer automation with hybrid AX + OCR + Moondream routing. Use when the user wants to control browser, native macOS apps, or anything visible on the screen — open apps, click buttons, type text, scrape pages, run multi-app workflows. Tools span Chrome (CDP), Finder/Mail/Anteprima/System Settings/Excel/etc. (AX + CGEvent + AppleScript), with Apple Vision OCR for exact-text targets and Moondream visual grounding for natural-language targets like "the gear icon top right".
+description: Vision-grounded computer automation for macOS — one skill for browser, native apps, and webviews. Use when the user wants to control a UI: open apps, click buttons, type text, scrape pages, run multi-app or multi-tab workflows, drive long-running REPLs. Routes through a unified cascade — learned-selector cache → Accessibility (AX) → Chrome DevTools (DOM) → Apple Vision OCR → Moondream visual grounding — picking the cheapest deterministic layer that resolves the target. Every click is verified post-action via DOM diff or screenshot diff. Successful resolutions are cached per (app, target) so subsequent calls skip the full cascade.
 ---
 
-# argus v0.2
+# argus
 
-Vision-grounded automation across **browser + desktop + every macOS app**.
-v0.2 adds a hybrid resolver (AX → OCR → Vision), in-process daemon, and
-self-verifying actions.
+One skill, three surfaces, one mental model.
 
 ## When to use
 
-- "Apri X e fai Y" / "Open X and do Y" — anything that involves a UI step
-- Clicking icons, buttons, links — including ones without text labels
-- Filling forms, typing into fields, pressing keyboard shortcuts
-- Multi-app workflows (e.g. extract data from a website → paste into Excel)
-- Anything where computer-use's pure pixel-clicking would be brittle
+- "Apri X e fai Y" / "Open X and do Y" — anything involving a UI step
+- Clicking icons, buttons, links — labeled or not
+- Filling forms, keyboard shortcuts
+- Multi-app or multi-tab workflows (web → native → file)
+- Driving a persistent REPL (Python, Node, psql, lldb, ssh)
+- Anything where pure pixel-clicking would be brittle
 
 ## Mental model
-
-Every click goes through a **cascade resolver** — fastest deterministic
-layer first, vision only when needed:
 
 ```
 target string
     │
     ▼
-┌────────────┐ raw "x,y"          → coords (instant)
-│  routing   │ deterministic AX   → ~50ms, native apps only
-│  cascade   │ Apple Vision OCR   → ~150ms, exact text on screen
-└────────────┘ Moondream vision   → ~1-3s, semantic descriptions
+┌─────────────┐  literal "x,y"          → coords (instant)
+│  cascade    │  learned cache hit      → ~5ms
+│  resolver   │  Accessibility (AX)     → ~50ms     (native + webview)
+│             │  Chrome DevTools DOM    → ~80ms     (browser only)
+│             │  Apple Vision OCR       → ~150ms    (any with text)
+└─────────────┘  Moondream vision       → ~1-3s     (semantic targets)
     │
     ▼
-action engine: CDP for browsers, CGEvent / AppleScript otherwise
+action engine: CDP (browser) | CGEvent (native) | AppleScript (escape hatch)
+    │
+    ▼
+verify (DOM diff | screenshot diff) → cache update
 ```
 
-You don't pick the layer — `argus_click` and `argus_find` pick by target
-shape and what's available. Result includes `source` so you can see what
-actually grounded the click.
+You don't pick the layer — `argus_click` and `argus_find` route by surface
+and target shape. Result includes `source` and `attempts` so you see exactly
+what grounded the click.
 
-## Core operations
+## Tools (17 total, 10 atomic)
 
-```
-argus_doctor                       # versions, AX/OCR/vision availability, daemon status
-argus_see                          # screenshot → base64 PNG
-argus_surface                      # frontmost app + URL/title
-argus_find    target               # resolve to coords WITHOUT clicking
-argus_click   target               # cascade resolve + click + verify
-argus_type    text                 # types into focused field (refuses on AXSecureTextField)
-argus_key     name [modifiers]     # special keys
-argus_scroll  direction [amount]
-argus_open_app  / argus_quit_app
-argus_exec_apple_script  code
-argus_run     code                 # python with argus pre-imported
-argus_session_begin / argus_session_end
-argus_vision_unload
-argus_history [limit] [tool]       # ~/.argus/intent.jsonl tail
-argus_metrics [reset]              # per-tool latency + success rate
-```
+**Atoms — these cover 90% of usage:**
 
-## Click semantics (important)
+| Tool | What |
+|---|---|
+| `argus_doctor` | AX / OCR / CDP / vision availability + surface router |
+| `argus_see` | Screenshot → base64 PNG |
+| `argus_surface` | Where am I? `{surface, app, host, scope}` |
+| `argus_find` | Resolve target → coords (no side effects) |
+| `argus_click` | Cascade resolve + click + verify, updates cache |
+| `argus_type` | Type into focused field (refuses on AXSecureTextField) |
+| `argus_key` | Special key + modifiers |
+| `argus_scroll` | Up/down/left/right at cursor or coords |
+| `argus_session` | `save / load / clear / list / detect_login` browser jars |
+| `argus_repl` | `start / send / read / kill / list` long-running processes |
+
+**Helpers:**
+
+| Tool | What |
+|---|---|
+| `argus_open_app` / `argus_quit_app` | Launch / quit macOS app |
+| `argus_exec_apple_script` | Escape hatch |
+| `argus_history` | Tail intent.jsonl with filters |
+| `argus_metrics` | Per-tool latency + success rate |
+| `argus_cache` | Inspect learned-selector cache |
+| `argus_session_begin` / `argus_session_end` / `argus_vision_unload` | Moondream RAM control |
+
+## Click semantics
 
 `argus_click` returns:
+
 ```json
 {
   "clicked": true,
   "x": 1240, "y": 88,
   "bbox": [1224, 72, 32, 32],
-  "source": "ax | ocr | vision | coords",
+  "source": "cache | ax | cdp | ocr | vision | coords",
   "confidence": 0.92,
-  "attempts": ["ax", "ocr"],
+  "scope": "native:com.apple.finder",
+  "attempts": ["cache", "ax"],
   "verified": {"ok": true, "reason": "region delta 5.4%", "global_distance": 11},
-  "annotated_b64": "..."   // only if confidence < annotate_below (default 0.75)
+  "ms_resolve": 56
 }
 ```
 
-- `verified.ok: false` means the click landed but **nothing visibly changed**
-  — likely missed, or hit a no-op. Re-screenshot and try a different target.
-- `annotated_b64` is your best friend on low-confidence clicks: shows the
-  bbox + crosshair where argus actually clicked.
-- Pass `verify: false` for fire-and-forget (e.g. opening a known menu).
+- `verified.ok: false` → click landed but **nothing visibly changed**. The cache
+  records the failure. Try a different target.
+- `source: "cache"` → resolved in 5ms from a previously successful selector.
+- `from_cache: true` (when `source` is e.g. `ax`) → cache validated against
+  live UI before being used.
 
 ## Decision flow
 
-1. **`argus_surface`** if you don't know where you are.
-2. **For browsers** (`surface == "browser"`): argus delegates clicks/typing
-   to CDP via `browser-harness`. Use `browser-harness` directly for richer
-   DOM operations.
-3. **For native apps**: cascade resolver handles it. If a target keeps
-   failing, try `argus_find` (no side effects) to see what argus sees.
-4. **App-specific quirks**: check `app-skills/<bundle_id>.md` (or call
-   `argus_doctor` then read the matching file). Pre-shipped: Finder, Mail,
-   Anteprima, Excel, System Settings.
+1. **`argus_surface`** to know the scope — answers `{surface, app, host, scope}`.
+2. **For browsers** (`surface == "browser"`): cascade includes CDP DOM. argus
+   talks to Chrome through `browser-harness`.
+3. **For native / webview**: cascade uses AX → OCR → vision.
+4. **For app-specific patterns**: check `app-skills/native/<bundle.id>.md` or
+   `app-skills/web/<host>.md`. Pre-shipped: Finder, Mail, Preview, Excel,
+   System Settings; github.com, mail.google.com, www.notion.so, linear.app.
+5. **For long-running shell sessions** (Python REPL, psql, lldb, ssh):
+   `argus_repl start cmd="python3"` then send/read.
 
 ## Sessions and RAM
 
-- Moondream loads lazily on first vision call (~10–30s cold).
-- After 5 min idle, the daemon unloads automatically.
-- For burst workloads call **`argus_session_begin`** at the start; pinning
-  prevents auto-unload. Call **`argus_session_end`** when done to free RAM
-  immediately.
-- `argus_vision_unload` forces an immediate unload at any time.
+- **Vision singleton**: one Moondream instance, shared by everything.
+- **Idle auto-unload** after 5 min.
+- **Burst workload**: `argus_session_begin` pins, `argus_session_end` frees.
+- `argus_vision_unload` drops it immediately.
 
-## Observability
+## Browser session persistence
 
-- `argus_history` reads `~/.argus/intent.jsonl` (the argus core writes
-  every action there). Useful for debugging "what did I just do?"
-- `argus_metrics` returns p50/p95/avg latency and success rate per tool
-  for the current MCP server process. Reset with `reset:true`.
+- `argus_session save name=<jar>` after manual login → captures cookies +
+  localStorage + IndexedDB.
+- `argus_session load name=<jar>` before driving → restores it.
+- `argus_session detect_login` returns true if you're sitting on a login wall.
+
+## Learned-selector cache
+
+Every successful `argus_click` writes `(scope, target) → (source, selector,
+confidence)` to `~/.argus-prime/cache.db`. The next call with the same target
+skips the cascade and replays the cached selector. Failures degrade the
+entry's success rate; entries with <40% success after 3+ tries are bypassed.
+
+Inspect: `argus_cache` (optionally `scope="web:github.com"`).
 
 ## Security guardrails
 
-- `argus_type` refuses to type into an `AXSecureTextField` (password). Pass
-  `force_secure: true` ONLY if the user explicitly asked you to.
-- Don't paste 2FA codes via `argus_type`. Defer to the user.
+- `argus_type` refuses to type into `AXSecureTextField` (passwords). Set
+  `force_secure: true` only when the user has explicitly asked.
+- Don't paste 2FA codes — defer to the user.
 - Don't bypass argus when you know vision will work — pixel-coord guessing
-  from screenshots is exactly what argus replaces.
+  from screenshots is what argus replaces.
 
 ## Auth-walled tasks
 
 Stop and ask the user if you hit a login wall, OS permission prompt
-(Accessibility, Screen Recording), or anything Apple ID-related. Don't try
-to bypass.
+(Accessibility, Screen Recording, Automation), or anything Apple-ID-related.
 
 ## Privacy
 
-- All vision inference is local (Moondream + Apple Vision on Apple Silicon)
-- Intent log lives at `~/.argus/intent.jsonl` — local only
-- Moondream API key (if used) stays in `~/.argus/.env`
+All vision inference is local (Moondream MPS + Apple Vision OCR).
+`~/.argus-prime/intent.jsonl` and `cache.db` are local-only.
 
 ## Architecture pointer
 
-The plugin's MCP server lives in `mcp_server/` and is split into:
-- `server.py`        — JSON-RPC dispatch + verify loop
-- `routing.py`       — AX → OCR → Vision cascade
-- `ax.py`            — AXUIElement walker
-- `ocr.py`           — VNRecognizeTextRequest wrapper
-- `daemon.py`        — in-process argus + warm Moondream session
-- `overlay.py`       — annotated screenshot generator
-- `diff.py`          — pre/post screenshot verifier
-- `history.py`       — intent log reader + in-process metrics
+```
+mcp_server/server.py        JSON-RPC + tool dispatch
+core/
+├── router.py               surface detection (browser / webview / native)
+├── cascade.py              unified resolver: cache → AX → CDP → OCR → vision
+├── verify.py               DOM diff (browser) | screenshot diff (native)
+├── vision.py               Moondream singleton (process-wide)
+├── intent.py               jsonl log + SQLite learned-selector cache + metrics
+├── session.py              browser session jars
+└── repl.py                 persistent processes
+adapters/
+├── ax.py, ocr.py           macOS native (pyobjc)
+├── cdp.py                  Chrome DevTools wrapper (over browser-harness)
+└── cgevent.py              mouse/key/screenshot
+app-skills/
+├── native/<bundle.id>.md
+└── web/<host>.md
+```

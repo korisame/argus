@@ -1,22 +1,17 @@
 """macOS Accessibility (AXUIElement) walker.
 
-Deterministic element lookup for native apps. Returns center pixel coords
-when a matching element is found, else None — caller falls back to OCR / vision.
-
-Requires Accessibility permission for the host app (System Settings →
-Privacy & Security → Accessibility → Claude / Terminal / etc.).
+Deterministic ~50ms element lookup for native apps. First layer of the cascade.
+Returns center pixel coords + bbox + role + matched text.
 """
 from __future__ import annotations
 
 import re
-from typing import Iterable, Optional
+from typing import Optional
 
 try:
-    # pyobjc — ships with macOS Python, but not always
     from ApplicationServices import (
         AXUIElementCreateApplication,
         AXUIElementCopyAttributeValue,
-        AXUIElementCopyAttributeNames,
         kAXChildrenAttribute,
         kAXTitleAttribute,
         kAXDescriptionAttribute,
@@ -26,18 +21,18 @@ try:
         kAXSubroleAttribute,
         kAXPositionAttribute,
         kAXSizeAttribute,
-        kAXEnabledAttribute,
         kAXFocusedAttribute,
     )
     from AppKit import NSWorkspace
     HAVE_AX = True
+    _AX_ERR = None
 except Exception as _e:  # pragma: no cover
     HAVE_AX = False
     _AX_ERR = repr(_e)
 
 
 TEXT_ATTRS = ("AXTitle", "AXDescription", "AXHelp", "AXValue", "AXPlaceholderValue")
-MAX_NODES = 4000          # safety cap per traversal
+MAX_NODES = 4000
 MAX_DEPTH = 40
 
 
@@ -53,11 +48,15 @@ def _attr(elem, name):
         return None
 
 
-def _frontmost_pid() -> Optional[int]:
+def frontmost_app() -> Optional[dict]:
     if not HAVE_AX:
         return None
     app = NSWorkspace.sharedWorkspace().frontmostApplication()
-    return int(app.processIdentifier()) if app else None
+    if not app:
+        return None
+    return {"pid": int(app.processIdentifier()),
+            "bundle_id": str(app.bundleIdentifier() or ""),
+            "name": str(app.localizedName() or "")}
 
 
 def _ax_app(pid: int):
@@ -69,12 +68,10 @@ def _bbox_center(elem):
     size = _attr(elem, kAXSizeAttribute)
     if not pos or not size:
         return None
-    # AXValue wraps CGPoint/CGSize; pyobjc unwraps them as tuples
     try:
         x, y = pos.x, pos.y
         w, h = size.width, size.height
     except AttributeError:
-        # Older pyobjc: AXValueGetValue helpers
         return None
     return {"x": float(x + w / 2), "y": float(y + h / 2),
             "bbox": [float(x), float(y), float(w), float(h)]}
@@ -95,49 +92,39 @@ def _walk(elem, depth=0, budget=None):
     if budget[0] <= 0 or depth > MAX_DEPTH:
         return
     budget[0] -= 1
-    yield elem, depth
+    yield elem
     children = _attr(elem, kAXChildrenAttribute) or []
     for c in children:
         yield from _walk(c, depth + 1, budget)
 
 
-def find(query: str, pid: int | None = None, fuzzy: bool = True) -> Optional[dict]:
-    """Find the best AX match for `query` in the frontmost (or given) app.
-
-    Returns {x, y, bbox, role, text, confidence, source: 'ax'} or None.
-    Strategy: collect all elements with non-empty text, score by:
-      - exact case-insensitive equality        → 1.0
-      - substring case-insensitive             → 0.8
-      - fuzzy token overlap                    → 0..0.7
-    Returns the highest-scoring element (with center coords).
-    """
+def find(target: str, pid: int | None = None) -> Optional[dict]:
+    """Best AX match for `target`. Score: exact 1.0, substring 0.8, fuzzy 0..0.7."""
     if not HAVE_AX:
         return None
-    pid = pid or _frontmost_pid()
-    if not pid:
+    front = frontmost_app() if pid is None else {"pid": pid}
+    if not front or not front.get("pid"):
         return None
-    root = _ax_app(pid)
+    root = _ax_app(front["pid"])
 
-    q = query.strip().lower()
+    q = target.strip().lower()
     q_tokens = set(re.findall(r"\w+", q))
     best = None
     best_score = 0.0
-    for elem, _depth in _walk(root):
-        texts = _texts_of(elem)
-        if not texts:
-            continue
-        for t in texts:
+
+    for elem in _walk(root):
+        for t in _texts_of(elem):
             tl = t.lower()
             if tl == q:
                 score = 1.0
             elif q in tl or tl in q:
                 score = 0.8 - min(0.3, abs(len(tl) - len(q)) / max(len(q), 1))
-            elif fuzzy and q_tokens:
+            elif q_tokens:
                 t_tokens = set(re.findall(r"\w+", tl))
                 if not t_tokens:
                     continue
-                overlap = len(q_tokens & t_tokens) / len(q_tokens | t_tokens)
-                score = 0.7 * overlap
+                ov = len(q_tokens & t_tokens) / len(q_tokens | t_tokens)
+                score = 0.7 * ov
             else:
                 continue
             if score > best_score:
@@ -146,34 +133,41 @@ def find(query: str, pid: int | None = None, fuzzy: bool = True) -> Optional[dic
                     continue
                 role = _attr(elem, kAXRoleAttribute) or ""
                 best_score = score
+                # selector key (storable in cache):
+                # role + matched-text — re-resolvable on next AX walk
+                selector = f"AX[role={role};text={t!r}]"
                 best = {**ctr, "role": str(role), "text": t,
-                        "confidence": round(score, 3), "source": "ax"}
+                        "confidence": round(score, 3),
+                        "source": "ax", "selector": selector}
                 if score >= 1.0:
                     return best
     return best
 
 
+def find_by_selector(selector: str, pid: int | None = None) -> Optional[dict]:
+    """Replay a cached AX selector. Returns same shape as find() or None."""
+    m = re.match(r"AX\[role=(.*?);text=(.+)\]$", selector)
+    if not m:
+        return None
+    target_text = m.group(2).strip().strip("'\"")
+    return find(target_text, pid=pid)
+
+
 def is_secure_field_focused(pid: int | None = None) -> bool:
-    """True if the focused element is an AXSecureTextField (password). For guardrails."""
     if not HAVE_AX:
         return False
-    pid = pid or _frontmost_pid()
-    if not pid:
+    front = frontmost_app() if pid is None else {"pid": pid}
+    if not front or not front.get("pid"):
         return False
-    root = _ax_app(pid)
-    # Walk to find focused element
-    for elem, _ in _walk(root):
-        focused = _attr(elem, kAXFocusedAttribute)
-        if focused:
-            sub = _attr(elem, kAXSubroleAttribute) or ""
-            role = _attr(elem, kAXRoleAttribute) or ""
-            return "Secure" in str(sub) or "Secure" in str(role)
+    root = _ax_app(front["pid"])
+    for elem in _walk(root):
+        if _attr(elem, kAXFocusedAttribute):
+            sub = str(_attr(elem, kAXSubroleAttribute) or "")
+            role = str(_attr(elem, kAXRoleAttribute) or "")
+            return "Secure" in sub or "Secure" in role
     return False
 
 
 def doctor() -> dict:
-    return {
-        "ax_available": HAVE_AX,
-        "error": _AX_ERR if not HAVE_AX else None,
-        "frontmost_pid": _frontmost_pid() if HAVE_AX else None,
-    }
+    return {"available": HAVE_AX, "error": _AX_ERR,
+            "frontmost": frontmost_app() if HAVE_AX else None}
