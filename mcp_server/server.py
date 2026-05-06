@@ -71,12 +71,14 @@ from core import (cascade, intent, router, vision, verify, session, repl,
                   browser_nav as _bnav, pdf as _pdf,
                   web_search as _wsearch, mail as _mail,
                   imessage as _imsg,
-                  git_ops as _git, scheduler as _sched, archive as _arch)
+                  git_ops as _git, scheduler as _sched, archive as _arch,
+                  http_client as _http, json_query as _jq, sql as _sql,
+                  image_ops as _img)
 from adapters import ax, ocr, cdp, cdp_raw, cgevent
 
 PROTO_VERSION = "2024-11-05"
 SERVER_NAME = "argus"
-SERVER_VERSION = "1.4.0"
+SERVER_VERSION = "1.5.0"
 
 WORKFLOWS_DIR = os.path.join(ROOT, "app-skills", "workflows")
 
@@ -326,6 +328,50 @@ TOOLS = [
          "name": {"type": "string"},
          "kind": {"type": "string", "enum": ["auto", "native", "web"], "default": "auto"}
      }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_http",
+     "description": "Generic HTTP client. method ∈ {GET, POST, PUT, PATCH, DELETE, HEAD}. Returns {status, headers, body, json (if Content-Type allows)}.",
+     "inputSchema": {"type": "object", "properties": {
+         "method": {"type": "string"},
+         "url": {"type": "string"},
+         "headers": {"type": "object"},
+         "body": {"type": "string"},
+         "json_body": {"type": "object"},
+         "timeout": {"type": "number", "default": 30.0}
+     }, "required": ["method", "url"], "additionalProperties": False}},
+
+    {"name": "argus_jq",
+     "description": "Tiny dotted-path JSON query. Path: foo.bar, foo[0], foo[*].bar, foo[?key=value]. Returns matched value/list.",
+     "inputSchema": {"type": "object", "properties": {
+         "json_text": {"type": "string"},
+         "path": {"type": "string"}
+     }, "required": ["json_text", "path"], "additionalProperties": False}},
+
+    {"name": "argus_sql",
+     "description": "SQLite client (read-only by default; allow_write=true for INSERT/UPDATE/DELETE/etc.). action ∈ {execute, list_tables, schema}.",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string", "enum": ["execute", "list_tables", "schema"], "default": "execute"},
+         "db_path": {"type": "string"},
+         "sql": {"type": "string"},
+         "params": {"type": "array"},
+         "table": {"type": "string"},
+         "allow_write": {"type": "boolean", "default": False},
+         "max_rows": {"type": "integer", "default": 500}
+     }, "required": ["action", "db_path"], "additionalProperties": False}},
+
+    {"name": "argus_image",
+     "description": "Image utility (PIL). action ∈ {info, resize, crop, convert}.",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string", "enum": ["info", "resize", "crop", "convert"]},
+         "path": {"type": "string"},
+         "out_path": {"type": "string"},
+         "max_dim": {"type": "integer", "default": 1600},
+         "bbox": {"type": "array", "items": {"type": "number"},
+                    "minItems": 4, "maxItems": 4},
+         "format": {"type": "string", "default": "PNG"},
+         "quality": {"type": "integer", "default": 85},
+         "keep_aspect": {"type": "boolean", "default": True}
+     }, "required": ["action", "path"], "additionalProperties": False}},
 
     {"name": "argus_git",
      "description": "Wrapped git operations. action ∈ {status, log, diff, add, commit, push, pull, checkout, branch_list, reset}. Destructive ops (push --force, reset --hard) require confirmed=true.",
@@ -1180,6 +1226,44 @@ def tool_argus_skills(args):
         if not args.get("name"):
             return _text({"error": "name required"})
         return _text(registry.install(args["name"], kind=args.get("kind", "auto")))
+    return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_http(args):
+    return _text(_http.request(args["method"], args["url"],
+                                  headers=args.get("headers"),
+                                  body=args.get("body"),
+                                  json_body=args.get("json_body"),
+                                  timeout=float(args.get("timeout", 30.0))))
+
+
+def tool_argus_jq(args):
+    return _text(_jq.query_str(args["json_text"], args["path"]))
+
+
+def tool_argus_sql(args):
+    action = args.get("action", "execute")
+    db = args["db_path"]
+    if action == "execute":     return _text(_sql.execute(db, args["sql"],
+                                                              params=args.get("params"),
+                                                              allow_write=bool(args.get("allow_write", False)),
+                                                              max_rows=int(args.get("max_rows", 500))))
+    if action == "list_tables": return _text(_sql.list_tables(db))
+    if action == "schema":      return _text(_sql.schema(db, args["table"]))
+    return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_image(args):
+    action = args["action"]
+    path = args["path"]
+    if action == "info":     return _text(_img.info(path))
+    if action == "resize":   return _text(_img.resize(path, max_dim=int(args.get("max_dim", 1600)),
+                                                          out_path=args.get("out_path"),
+                                                          keep_aspect=bool(args.get("keep_aspect", True))))
+    if action == "crop":     return _text(_img.crop(path, bbox=args["bbox"], out_path=args.get("out_path")))
+    if action == "convert":  return _text(_img.convert(path, out_path=args["out_path"],
+                                                          format=args.get("format", "PNG"),
+                                                          quality=int(args.get("quality", 85))))
     return _text({"error": f"unknown action: {action}"})
 
 
