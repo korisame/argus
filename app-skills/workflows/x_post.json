@@ -1,0 +1,15 @@
+{
+  "name": "x_post",
+  "scope": "web:x.com",
+  "description": "Post a tweet on x.com (formerly Twitter). Stops before submit — user confirms.",
+  "vars": {"text": "Hello from argus"},
+  "steps": [
+    {"do": "open_app", "args": {"name": "Google Chrome"}},
+    {"do": "wait_for", "args": {"target": "x.com", "timeout_s": 6}},
+    {"do": "key", "args": {"name": "n"}},
+    {"do": "wait_for", "args": {"target": "What is happening", "timeout_s": 5}},
+    {"do": "paste", "args": {"text": "{{text}}"}}
+  ],
+  "post": "User confirms with Cmd+Return.",
+  "on_error": "abort"
+}

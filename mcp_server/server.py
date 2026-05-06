@@ -70,12 +70,13 @@ from core import (cascade, intent, router, vision, verify, session, repl,
                   notify as _notify, voice as _voice,
                   browser_nav as _bnav, pdf as _pdf,
                   web_search as _wsearch, mail as _mail,
-                  imessage as _imsg)
+                  imessage as _imsg,
+                  git_ops as _git, scheduler as _sched, archive as _arch)
 from adapters import ax, ocr, cdp, cdp_raw, cgevent
 
 PROTO_VERSION = "2024-11-05"
 SERVER_NAME = "argus"
-SERVER_VERSION = "1.3.0"
+SERVER_VERSION = "1.4.0"
 
 WORKFLOWS_DIR = os.path.join(ROOT, "app-skills", "workflows")
 
@@ -325,6 +326,46 @@ TOOLS = [
          "name": {"type": "string"},
          "kind": {"type": "string", "enum": ["auto", "native", "web"], "default": "auto"}
      }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_git",
+     "description": "Wrapped git operations. action ∈ {status, log, diff, add, commit, push, pull, checkout, branch_list, reset}. Destructive ops (push --force, reset --hard) require confirmed=true.",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string"},
+         "cwd": {"type": "string"},
+         "message": {"type": "string"},
+         "paths": {"type": "array", "items": {"type": "string"}},
+         "all_files": {"type": "boolean", "default": False},
+         "remote": {"type": "string", "default": "origin"},
+         "branch": {"type": "string"},
+         "force": {"type": "boolean", "default": False},
+         "rebase": {"type": "boolean", "default": False},
+         "ref": {"type": "string"},
+         "hard": {"type": "boolean", "default": False},
+         "staged": {"type": "boolean", "default": False},
+         "path": {"type": "string"},
+         "n": {"type": "integer", "default": 10},
+         "allow_empty": {"type": "boolean", "default": False},
+         "confirmed": {"type": "boolean", "default": False}
+     }, "required": ["action", "cwd"], "additionalProperties": False}},
+
+    {"name": "argus_schedule",
+     "description": "Schedule an argus tool to run on a launchd calendar. action ∈ {install, uninstall, list}. install needs name+tool+args+hour+minute (optional weekday 0=Sun..6=Sat).",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string", "enum": ["install", "uninstall", "list"]},
+         "name": {"type": "string"},
+         "tool": {"type": "string"},
+         "args": {"type": "object"},
+         "hour": {"type": "integer", "default": 9},
+         "minute": {"type": "integer", "default": 0},
+         "weekday": {"type": "integer"}
+     }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_archive",
+     "description": "Bundle the current argus session into a tar.gz (intent.jsonl + cache.db + patterns.db + last N screenshots) for sharing/debug.",
+     "inputSchema": {"type": "object", "properties": {
+         "include_screenshots": {"type": "integer", "default": 50},
+         "out_path": {"type": "string"}
+     }, "additionalProperties": False}},
 
     {"name": "argus_search_web",
      "description": "Web search via DuckDuckGo HTML (no API key). Returns top results with title + url + snippet.",
@@ -1140,6 +1181,42 @@ def tool_argus_skills(args):
             return _text({"error": "name required"})
         return _text(registry.install(args["name"], kind=args.get("kind", "auto")))
     return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_git(args):
+    action = args["action"]
+    cwd = args["cwd"]
+    if action == "status":      return _text(_git.status(cwd))
+    if action == "log":         return _text(_git.log(cwd, n=int(args.get("n", 10))))
+    if action == "diff":        return _text(_git.diff(cwd, staged=bool(args.get("staged", False)), path=args.get("path")))
+    if action == "add":         return _text(_git.add(cwd, paths=args.get("paths"), all_files=bool(args.get("all_files", False))))
+    if action == "commit":      return _text(_git.commit(cwd, args.get("message", ""), allow_empty=bool(args.get("allow_empty", False))))
+    if action == "push":        return _text(_git.push(cwd, remote=args.get("remote", "origin"), branch=args.get("branch"),
+                                                          force=bool(args.get("force", False)), confirmed=bool(args.get("confirmed", False))))
+    if action == "pull":        return _text(_git.pull(cwd, remote=args.get("remote", "origin"), branch=args.get("branch"),
+                                                          rebase=bool(args.get("rebase", False))))
+    if action == "checkout":    return _text(_git.checkout(cwd, args.get("ref", "main")))
+    if action == "branch_list": return _text(_git.branch_list(cwd))
+    if action == "reset":       return _text(_git.reset(cwd, args.get("ref", "HEAD"),
+                                                          hard=bool(args.get("hard", False)),
+                                                          confirmed=bool(args.get("confirmed", False))))
+    return _text({"error": f"unknown git action: {action}"})
+
+
+def tool_argus_schedule(args):
+    action = args["action"]
+    if action == "install":   return _text(_sched.install(args["name"], tool=args["tool"], args=args.get("args") or {},
+                                                              hour=int(args.get("hour", 9)),
+                                                              minute=int(args.get("minute", 0)),
+                                                              weekday=args.get("weekday")))
+    if action == "uninstall": return _text(_sched.uninstall(args["name"]))
+    if action == "list":      return _text(_sched.list_jobs())
+    return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_archive(args):
+    return _text(_arch.bundle(include_screenshots=int(args.get("include_screenshots", 50)),
+                                out_path=args.get("out_path")))
 
 
 def tool_argus_search_web(args):

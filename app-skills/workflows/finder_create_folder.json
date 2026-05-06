@@ -1,0 +1,14 @@
+{
+  "name": "finder_create_folder",
+  "scope": "native:com.apple.finder",
+  "description": "Create a new folder in current Finder window with given name.",
+  "vars": {"name": "New Folder"},
+  "steps": [
+    {"do": "open_app", "args": {"name": "Finder"}},
+    {"do": "send_keys", "args": {"combo": "shift+cmd+n"}},
+    {"do": "wait_for", "args": {"target": "untitled folder", "timeout_s": 3}},
+    {"do": "type", "args": {"text": "{{name}}"}},
+    {"do": "key", "args": {"name": "Return"}}
+  ],
+  "on_error": "abort"
+}

@@ -1,0 +1,13 @@
+{
+  "name": "spotlight_open",
+  "scope": "native:any",
+  "description": "Open anything macOS knows about via Spotlight.",
+  "vars": {"query": "Calculator"},
+  "steps": [
+    {"do": "send_keys", "args": {"combo": "cmd+Space"}},
+    {"do": "wait_for", "args": {"target": "Spotlight", "timeout_s": 2}},
+    {"do": "type", "args": {"text": "{{query}}"}},
+    {"do": "key", "args": {"name": "Return"}}
+  ],
+  "on_error": "continue"
+}

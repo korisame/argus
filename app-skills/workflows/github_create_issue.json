@@ -1,0 +1,17 @@
+{
+  "name": "github_create_issue",
+  "scope": "web:github.com",
+  "description": "Create an issue on the current repo via UI (use 'gh issue create' CLI for headless).",
+  "vars": {"title": "Issue title", "body": "Issue body"},
+  "steps": [
+    {"do": "open_app", "args": {"name": "Google Chrome"}},
+    {"do": "wait_for", "args": {"target": "github.com", "timeout_s": 6}},
+    {"do": "key", "args": {"name": "c", "modifiers": "shift"}},
+    {"do": "wait_for", "args": {"target": "Title", "timeout_s": 5}},
+    {"do": "type", "args": {"text": "{{title}}"}},
+    {"do": "key", "args": {"name": "Tab"}},
+    {"do": "paste", "args": {"text": "{{body}}"}}
+  ],
+  "post": "User confirms before clicking Submit.",
+  "on_error": "abort"
+}

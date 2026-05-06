@@ -1,0 +1,17 @@
+{
+  "name": "slack_dm",
+  "scope": "native:com.tinyspeck.slackmacgap",
+  "description": "Open a DM in Slack and send a message via Cmd+K quick switcher.",
+  "vars": {"recipient": "user", "message": "Hello"},
+  "steps": [
+    {"do": "open_app", "args": {"name": "Slack"}},
+    {"do": "wait_for", "args": {"target": "Slack", "timeout_s": 6}},
+    {"do": "send_keys", "args": {"combo": "cmd+k"}},
+    {"do": "type", "args": {"text": "{{recipient}}"}},
+    {"do": "key", "args": {"name": "Return"}},
+    {"do": "wait_for", "args": {"target": "{{recipient}}", "timeout_s": 5}},
+    {"do": "paste", "args": {"text": "{{message}}"}}
+  ],
+  "post": "Confirm send via Return key only after the user explicitly approves.",
+  "on_error": "abort"
+}
