@@ -1,6 +1,6 @@
 {
   "name": "argus",
-  "version": "2.4.0",
+  "version": "2.5.0",
   "description": "Vision-grounded computer automation for macOS. Single unified resolver across browser (CDP), native apps (AX), and webviews — with cache-driven learned selectors, self-verifying actions, persistent REPL, and per-app/per-host skills.",
   "author": {"name": "Shaun Gioele"},
   "keywords": ["automation", "vision", "macos", "browser", "computer-use", "accessibility", "ocr", "mcp"],
