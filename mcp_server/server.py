@@ -73,12 +73,13 @@ from core import (cascade, intent, router, vision, verify, session, repl,
                   imessage as _imsg,
                   git_ops as _git, scheduler as _sched, archive as _arch,
                   http_client as _http, json_query as _jq, sql as _sql,
-                  image_ops as _img)
+                  image_ops as _img,
+                  text_search as _tsearch, smart_click as _sc)
 from adapters import ax, ocr, cdp, cdp_raw, cgevent
 
 PROTO_VERSION = "2024-11-05"
 SERVER_NAME = "argus"
-SERVER_VERSION = "1.5.0"
+SERVER_VERSION = "1.6.0"
 
 WORKFLOWS_DIR = os.path.join(ROOT, "app-skills", "workflows")
 
@@ -328,6 +329,25 @@ TOOLS = [
          "name": {"type": "string"},
          "kind": {"type": "string", "enum": ["auto", "native", "web"], "default": "auto"}
      }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_text_search",
+     "description": "Search a substring across all visible windows (foreground+background). Returns matches with bbox in screen coords + window metadata.",
+     "inputSchema": {"type": "object", "properties": {
+         "query": {"type": "string"},
+         "case_sensitive": {"type": "boolean", "default": False},
+         "max_windows": {"type": "integer", "default": 12},
+         "max_matches": {"type": "integer", "default": 50}
+     }, "required": ["query"], "additionalProperties": False}},
+
+    {"name": "argus_smart_click",
+     "description": "Robust click with retries + alternate targets. Tries `target` first, then each `alternates` in order. Use when one target description is unreliable across UI states.",
+     "inputSchema": {"type": "object", "properties": {
+         "target": {"type": "string"},
+         "alternates": {"type": "array", "items": {"type": "string"}},
+         "retries": {"type": "integer", "default": 2},
+         "retry_delay_s": {"type": "number", "default": 0.6},
+         "require_verify": {"type": "boolean", "default": True}
+     }, "required": ["target"], "additionalProperties": False}},
 
     {"name": "argus_http",
      "description": "Generic HTTP client. method ∈ {GET, POST, PUT, PATCH, DELETE, HEAD}. Returns {status, headers, body, json (if Content-Type allows)}.",
@@ -1227,6 +1247,22 @@ def tool_argus_skills(args):
             return _text({"error": "name required"})
         return _text(registry.install(args["name"], kind=args.get("kind", "auto")))
     return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_text_search(args):
+    return _text(_tsearch.search(args["query"],
+                                    case_sensitive=bool(args.get("case_sensitive", False)),
+                                    max_windows=int(args.get("max_windows", 12)),
+                                    max_matches=int(args.get("max_matches", 50))))
+
+
+def tool_argus_smart_click(args):
+    return _text(_sc.smart_click(args["target"],
+                                    alternates=args.get("alternates"),
+                                    handlers=HANDLERS,
+                                    retries=int(args.get("retries", 2)),
+                                    retry_delay_s=float(args.get("retry_delay_s", 0.6)),
+                                    require_verify=bool(args.get("require_verify", True))))
 
 
 def tool_argus_http(args):
