@@ -82,12 +82,13 @@ from core import (cascade, intent, router, vision, verify, session, repl,
                   summary as _summary, observe as _observe,
                   browser_advanced as _badv,
                   log_search as _lsearch, skills_export as _sexport,
-                  help as _help)
+                  help as _help,
+                  download as _dl, archive_ops as _aops, text_diff as _tdiff)
 from adapters import ax, ocr, cdp, cdp_raw, cgevent
 
 PROTO_VERSION = "2024-11-05"
 SERVER_NAME = "argus"
-SERVER_VERSION = "2.2.0"
+SERVER_VERSION = "2.3.0"
 
 WORKFLOWS_DIR = os.path.join(ROOT, "app-skills", "workflows")
 
@@ -336,6 +337,36 @@ TOOLS = [
          "action": {"type": "string", "enum": ["index", "install", "list_local"]},
          "name": {"type": "string"},
          "kind": {"type": "string", "enum": ["auto", "native", "web"], "default": "auto"}
+     }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_download",
+     "description": "Download a URL to disk. Follows redirects, caps at max_bytes.",
+     "inputSchema": {"type": "object", "properties": {
+         "url": {"type": "string"},
+         "out_path": {"type": "string"},
+         "max_bytes": {"type": "integer", "default": 524288000},
+         "headers": {"type": "object"},
+         "timeout": {"type": "number", "default": 60.0}
+     }, "required": ["url"], "additionalProperties": False}},
+
+    {"name": "argus_archive_ops",
+     "description": "Archive utilities. action ∈ {zip, unzip, tar, untar, gzip, gunzip}.",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string", "enum": ["zip", "unzip", "tar", "untar", "gzip", "gunzip"]},
+         "paths": {"type": "array", "items": {"type": "string"}},
+         "in_path": {"type": "string"},
+         "out_path": {"type": "string"},
+         "out_dir": {"type": "string"},
+         "gzip_compress": {"type": "boolean", "default": True}
+     }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_text_diff",
+     "description": "Unified text diff. action ∈ {strings, files, similarity}. Useful for verifying edits.",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string", "enum": ["strings", "files", "similarity"]},
+         "a": {"type": "string"}, "b": {"type": "string"},
+         "a_path": {"type": "string"}, "b_path": {"type": "string"},
+         "context": {"type": "integer", "default": 3}
      }, "required": ["action"], "additionalProperties": False}},
 
     {"name": "argus_log_search",
@@ -1414,6 +1445,35 @@ def tool_argus_skills(args):
         if not args.get("name"):
             return _text({"error": "name required"})
         return _text(registry.install(args["name"], kind=args.get("kind", "auto")))
+    return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_download(args):
+    return _text(_dl.download(args["url"], out_path=args.get("out_path"),
+                                 max_bytes=int(args.get("max_bytes", 524288000)),
+                                 headers=args.get("headers"),
+                                 timeout=float(args.get("timeout", 60.0))))
+
+
+def tool_argus_archive_ops(args):
+    action = args["action"]
+    if action == "zip":     return _text(_aops.zip_create(args["paths"], args["out_path"]))
+    if action == "unzip":   return _text(_aops.zip_extract(args["in_path"], out_dir=args.get("out_dir")))
+    if action == "tar":     return _text(_aops.tar_create(args["paths"], args["out_path"],
+                                                              gzip_compress=bool(args.get("gzip_compress", True))))
+    if action == "untar":   return _text(_aops.tar_extract(args["in_path"], out_dir=args.get("out_dir")))
+    if action == "gzip":    return _text(_aops.gzip_compress(args["in_path"], out_path=args.get("out_path")))
+    if action == "gunzip":  return _text(_aops.gzip_decompress(args["in_path"], out_path=args.get("out_path")))
+    return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_text_diff(args):
+    action = args["action"]
+    if action == "strings":     return _text(_tdiff.diff_strings(args["a"], args["b"],
+                                                                     context=int(args.get("context", 3))))
+    if action == "files":       return _text(_tdiff.diff_files(args["a_path"], args["b_path"],
+                                                                   context=int(args.get("context", 3))))
+    if action == "similarity":  return _text(_tdiff.similarity(args["a"], args["b"]))
     return _text({"error": f"unknown action: {action}"})
 
 

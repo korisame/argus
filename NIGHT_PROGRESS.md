@@ -1,37 +1,38 @@
-# Argus v2.0.0 — overnight build complete
+# Argus v2.2.0 — overnight build complete
 
 **Repo:** https://github.com/korisame/argus
-**Release:** https://github.com/korisame/argus/releases/tag/v2.0.0
-**Local:** ~/.claude/plugins/argus → v2.0.0 (86 tools, READY)
+**v2.0.0 release:** https://github.com/korisame/argus/releases/tag/v2.0.0
+**Local:** ~/.claude/plugins/argus → v2.2.0 (93 tools, READY)
 
-## Versions shipped (rollback-safe tags)
+## Tags shipped overnight (rollback-safe)
 
-| Tag | Tools | What |
+| Tag | Tools | Highlight |
 |---|---|---|
-| v0.4.0-stable | 24 | first production-ready, ROLLBACK TARGET |
-| v1.0.0 | 54 | first stable release |
+| v0.4.0-stable | 24 | ROLLBACK TARGET |
+| v1.0.0 | 54 | first stable |
 | v1.5.0 | 73 | http + jq + sql + image |
-| v1.8.0 | 80 | drag + system + app_explore fix |
-| **v2.0.0** | 86 | observe + summary, MAJOR RELEASE |
+| v2.0.0 | 86 | summary + observe DSL (major release) |
+| v2.1.0 | 90 | cookies + localstorage + emulate + pdf_export |
+| **v2.2.0** | 93 | log_search + export_skills + help |
 
-Total: 17 tags shipped overnight.
+19 tags total. ~9000+ lines net new across 56+ modules.
 
-## Tools by category (86 total)
+## What's in 93 tools
 
-- Resolver (12), Discovery (8), Higher-order (10), Browser (3),
+- Resolver atoms (12), Discovery (8), Higher-order (10), Browser (8 incl. cookies/LS/emulate/PDF),
   Apple apps (8), System (8), Files+data (8), Voice/translate/web (4),
-  Admin (12), Safety (4), Devops (3), Compatibility (1),
-  Onboarding (1), Diff/history (3), Observability (2)
+  Admin (12), Safety (4), Devops (3), Compatibility (1), Onboarding (2),
+  Diff/history (3), Observability (5)
 
-## Final live verification
+## Live verification (just now)
 
 - 9/9 pytest passing
-- argus_doctor: status=READY on all 5 deps
-- argus_summary: live, returns 1-line snapshot
-- argus_observe: 4 event kinds (text_appears, state_changes, app_changes, http_endpoint)
-- All earlier tools verified (cu_route, chain, workspace, predict, etc.)
+- argus_doctor: status=READY on all 5 deps (ax, ocr, cdp, vision, argus_core)
+- argus_summary: live 1-line snapshot
+- argus_help: 14 categorized tool topics
+- argus_log_search, argus_export_skills working
 
-## Performance (M-series)
+## Performance (M-series Apple Silicon)
 
 | op | p50 |
 |---|---|
@@ -42,25 +43,23 @@ Total: 17 tags shipped overnight.
 | ocr.all_text(fast) | 8ms |
 | screencapture | 85ms |
 
-## Bugs fixed overnight
-
-- v1.0: cdp_raw WS Origin handshake (Chrome 130+ anti-CSRF)
-- v0.5: Notes/Reminders TCC timeout (open-first pattern)
-- v1.7→v1.8: app_explore cold-start (poll up to 8s)
-
 ## Things to do in the morning
 
-1. **Restart Claude Code** to load v2.0.0 (86 tools)
+1. **Restart Claude Code** to load v2.2.0 (93 tools)
 2. `gh auth refresh -h github.com -s delete_repo workflow` then:
-   - `gh repo delete korisame/background-screenshot` (today only archived)
+   - `gh repo delete korisame/background-screenshot`
    - re-add `.github/workflows/ci.yml`
 3. Read: `~/Desktop/ARGUS_v0.5.0_marketing_TODO.md` (full marketing plan)
-4. Open dashboard: `argus_dashboard action=start` → http://127.0.0.1:9999
+4. Try: `argus_help` (no args) → see all 14 tool categories
+5. Try: `argus_summary` → 1-line state snapshot
+6. Open dashboard: `argus_dashboard action=start` → http://127.0.0.1:9999
 
-## Lines of code
+## Status
 
-~8000+ net new across 50+ new modules. Behind tag-based rollback.
-
-## Status: READY for marketing push.
+argus is now a 93-tool macOS automation platform. Replaces Anthropic
+Computer Use entirely on Mac. Task patterns + replay + workflows + chains +
+multi-window orchestration + cookies/localStorage/emulate + Apple ecosystem
+(Notes/Mail/Calendar/Contacts/iMessage/Reminders) + git + scheduler + http +
+sql + observability all in one MCP server.
 
 Continuing iteration if credits allow.
