@@ -7,7 +7,22 @@
 [![macOS](https://img.shields.io/badge/macOS-13+-black?logo=apple)]()
 [![MCP](https://img.shields.io/badge/MCP-server-purple)]()
 
-> *Demo GIF goes here — argus_click "the gear icon top right" with bbox overlay + verified.ok=true* (run `argus_benchmark` to see the numbers below on your hardware.)
+> *Demo GIF goes here — argus_click "the gear icon top right" with bbox overlay + verified.ok=true*
+
+## Performance — measured on M-series Apple Silicon
+
+| Operation | p50 | p95 | Notes |
+|---|---|---|---|
+| `intent.cache_lookup(miss)` | **0.11ms** | 0.86ms | SQLite hit (positive case is similar) |
+| `vision.status` | 0.01ms | 0.03ms | singleton check |
+| `router.detect` | 0ms | 0.22ms | bundle-id lookup |
+| `cdp_raw.page_info` | **0.37ms** | 15.82ms | persistent websocket reused |
+| `ax.find('File')` | **0.73ms** | 42.11ms | walks AXUIElement tree |
+| `screen.list_windows` | 6.78ms | 7.35ms | Quartz API, all 88 windows |
+| `ocr.all_text(fast)` | **8.01ms** | 208.67ms | Apple Vision native, ~88 boxes |
+| `screencapture` | 85.22ms | 91.81ms | OS command, dominant cost |
+
+Run `argus_benchmark` on your hardware to reproduce.
 
 ---
 

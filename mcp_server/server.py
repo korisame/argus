@@ -62,12 +62,13 @@ from core import (cascade, intent, router, vision, verify, session, repl,
                   asyncio_runtime, extract, safety, secure_session,
                   replay as _replay, workflow as _workflow,
                   apple_apps, diff_screens, macros,
-                  benchmark, health)
+                  benchmark, health, chain as _chain,
+                  workspace as _workspace, predict as _predict)
 from adapters import ax, ocr, cdp, cdp_raw, cgevent
 
 PROTO_VERSION = "2024-11-05"
 SERVER_NAME = "argus"
-SERVER_VERSION = "0.9.0"
+SERVER_VERSION = "0.10.0"
 
 WORKFLOWS_DIR = os.path.join(ROOT, "app-skills", "workflows")
 
@@ -317,6 +318,38 @@ TOOLS = [
          "name": {"type": "string"},
          "kind": {"type": "string", "enum": ["auto", "native", "web"], "default": "auto"}
      }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_chain",
+     "description": "Composable tool pipeline. steps=[{tool, args, [as]}]. Output of each step bound to {{prev}} or {{step_N}}/{{as}} for subsequent steps. Use to fuse multi-step ops into one MCP call.",
+     "inputSchema": {"type": "object", "properties": {
+         "steps": {"type": "array", "items": {"type": "object",
+             "properties": {"tool": {"type": "string"},
+                              "args": {"type": "object"},
+                              "as": {"type": "string"}},
+             "required": ["tool"]}},
+         "on_error": {"type": "string", "enum": ["abort", "continue"], "default": "abort"}
+     }, "required": ["steps"], "additionalProperties": False}},
+
+    {"name": "argus_workspace",
+     "description": "Multi-window orchestration. tasks=[{app, tool, args}]. Brings each app to front, runs tool, captures result. Optionally returns to a final app at the end.",
+     "inputSchema": {"type": "object", "properties": {
+         "tasks": {"type": "array", "items": {"type": "object",
+             "properties": {"app": {"type": "string"},
+                              "tool": {"type": "string"},
+                              "args": {"type": "object"}}}},
+         "return_to": {"type": "string"}
+     }, "required": ["tasks"], "additionalProperties": False}},
+
+    {"name": "argus_workspace_capture_all",
+     "description": "Capture screenshots of ALL visible windows (foreground + background) at once. Returns list of {wid, owner, title, path}. Capped at 20 to avoid disk spam.",
+     "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
+
+    {"name": "argus_predict_next",
+     "description": "Suggest the next likely action for the current scope based on saved patterns + recent intent history. Returns ranked suggestions with replay hints.",
+     "inputSchema": {"type": "object", "properties": {
+         "scope": {"type": "string"},
+         "top_n": {"type": "integer", "default": 5}
+     }, "additionalProperties": False}},
 
     {"name": "argus_benchmark",
      "description": "Run a perf suite (router, AX, OCR, CDP, vision, screencapture, cache). Returns p50/p95/avg/stdev per op.",
@@ -980,6 +1013,25 @@ def tool_argus_skills(args):
             return _text({"error": "name required"})
         return _text(registry.install(args["name"], kind=args.get("kind", "auto")))
     return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_chain(args):
+    return _text(_chain.run(args["steps"], handlers=HANDLERS,
+                              on_error=args.get("on_error", "abort")))
+
+
+def tool_argus_workspace(args):
+    return _text(_workspace.run_tasks(args["tasks"], handlers=HANDLERS,
+                                        return_to=args.get("return_to")))
+
+
+def tool_argus_workspace_capture_all(_):
+    return _text(_workspace.background_capture_all())
+
+
+def tool_argus_predict_next(args):
+    return _text(_predict.predict(scope=args.get("scope"),
+                                    top_n=int(args.get("top_n", 5))))
 
 
 def tool_argus_benchmark(args):
