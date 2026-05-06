@@ -59,12 +59,12 @@ _DOTENV_INFO = _load_dotenv()
 from core import (cascade, intent, router, vision, verify, session, repl,
                   autotune, screen, patterns, policy, prewarm, dashboard,
                   wizard, uninstall as _uninstall, chrome_admin, registry,
-                  asyncio_runtime)
+                  asyncio_runtime, extract, safety, secure_session)
 from adapters import ax, ocr, cdp, cdp_raw, cgevent
 
 PROTO_VERSION = "2024-11-05"
 SERVER_NAME = "argus"
-SERVER_VERSION = "0.5.0"
+SERVER_VERSION = "0.6.0"
 
 
 # ─── tool catalog ─────────────────────────────────────────────────────
@@ -166,9 +166,10 @@ TOOLS = [
      }, "required": ["name"], "additionalProperties": False}},
 
     {"name": "argus_exec_apple_script",
-     "description": "Run arbitrary AppleScript. Escape hatch.",
+     "description": "Run arbitrary AppleScript. Escape hatch — sandboxed via safety.is_dangerous(). Refuses on rm -rf / fork bombs / disk-erase / admin escalation. Pass allow_dangerous=true (audit-logged) to override.",
      "inputSchema": {"type": "object", "properties": {
-         "code": {"type": "string"}
+         "code": {"type": "string"},
+         "allow_dangerous": {"type": "boolean", "default": False}
      }, "required": ["code"], "additionalProperties": False}},
 
     {"name": "argus_session",
@@ -311,6 +312,32 @@ TOOLS = [
          "name": {"type": "string"},
          "kind": {"type": "string", "enum": ["auto", "native", "web"], "default": "auto"}
      }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_extract",
+     "description": "Extract structured data from a screenshot. Pass {schema: {field_name: 'natural language description'}}. Returns {field: value, _meta:{...}}. OCR-first then Moondream Q&A. Use for scraping any site/app without an API.",
+     "inputSchema": {"type": "object", "properties": {
+         "schema": {"type": "object", "additionalProperties": {"type": "string"},
+                     "description": "field_name → description"},
+         "window_app": {"type": "string", "description": "capture this app's window instead of frontmost"}
+     }, "required": ["schema"], "additionalProperties": False}},
+
+    {"name": "argus_ask",
+     "description": "Visual question-answering on the current screen (or window). Returns {answer, screenshot}. Use for 'is the build green?', 'what's the error in this dialog?', 'how many unread emails?'.",
+     "inputSchema": {"type": "object", "properties": {
+         "question": {"type": "string"},
+         "window_app": {"type": "string"}
+     }, "required": ["question"], "additionalProperties": False}},
+
+    {"name": "argus_secure_session",
+     "description": "Encrypted session jars (cookies+localStorage+IDB). action ∈ {encrypt, decrypt, list}. Encryption key per-jar in macOS Keychain. AES-256-GCM (or openssl fallback).",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string", "enum": ["encrypt", "decrypt", "list"]},
+         "name": {"type": "string", "default": "default"}
+     }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_log_rotate",
+     "description": "Rotate intent.jsonl if > 50MB (gzip + keep last 5). Run nightly via cron, or on-demand.",
+     "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
 
     {"name": "argus_cu_route",
      "description": "Computer Use shim. Translates Anthropic Computer-Use-style {action, coordinate, text, ...} payloads into native argus tools. Lets agents that 'know how to' use Computer Use drive argus instead. action examples: 'screenshot', 'left_click', 'type', 'key', 'scroll', 'mouse_move'.",
@@ -660,9 +687,13 @@ def tool_argus_quit_app(args):
 
 
 def tool_argus_exec_apple_script(args):
-    res = cgevent.exec_apple_script(args["code"])
-    intent.log("argus.exec_apple_script", outcome="ok" if res.get("ok") else "fail",
-               observation={"stdout_len": len(res.get("stdout", ""))})
+    code = args["code"]
+    allow = bool(args.get("allow_dangerous", False))
+    res = safety.safe_exec_apple_script(code, allow_dangerous=allow)
+    intent.log("argus.exec_apple_script",
+               outcome="ok" if res.get("ok") else ("blocked" if res.get("blocked_by_safety") else "fail"),
+               observation={"stdout_len": len(res.get("stdout", "")),
+                             "blocked": res.get("blocked_by_safety")})
     return _text(res)
 
 
@@ -857,6 +888,39 @@ def tool_argus_skills(args):
             return _text({"error": "name required"})
         return _text(registry.install(args["name"], kind=args.get("kind", "auto")))
     return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_extract(args):
+    return _text(extract.extract(args["schema"], window_app=args.get("window_app")))
+
+
+def tool_argus_ask(args):
+    q = args["question"]
+    win = args.get("window_app")
+    if win:
+        cap = screen.capture_window(app=win, out_path="/tmp/argus_ask.png")
+    else:
+        cap = screen.capture_frontmost(out_path="/tmp/argus_ask.png")
+    if not cap.get("ok"):
+        return _text({"ok": False, "error": cap.get("error")})
+    ans = vision.VISION.ask(cap["path"], q)
+    intent.log("argus.ask", target=q, outcome="ok" if ans else "fail",
+               source="vision", observation={"answer_chars": len(ans or "")})
+    return _text({"answer": ans, "question": q, "screenshot": cap["path"],
+                  "window": cap.get("window")})
+
+
+def tool_argus_secure_session(args):
+    action = args["action"]
+    name = args.get("name", "default")
+    if action == "encrypt": return _text(secure_session.encrypt_jar(name))
+    if action == "decrypt": return _text(secure_session.decrypt_jar(name))
+    if action == "list":    return _text(secure_session.list_jars())
+    return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_log_rotate(_):
+    return _text(safety.rotate_logs())
 
 
 def tool_argus_cu_route(args):

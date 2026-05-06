@@ -127,6 +127,30 @@ class _VisionSingleton:
             return None
         return None
 
+    def ask(self, screenshot_path: str, question: str) -> Optional[str]:
+        """Visual Q&A over a screenshot. Returns textual answer or None."""
+        mode = self._ensure()
+        if mode == "none":
+            return None
+        try:
+            if mode == "argus":
+                fn = (getattr(self._argus_v, "query", None)
+                      or getattr(self._argus_v, "ask", None))
+                if not callable(fn):
+                    return None
+                self._last_use = time.monotonic()
+                self._arm_timer()
+                return fn(screenshot_path, question)
+            if mode == "cloud":
+                from PIL import Image
+                img = Image.open(screenshot_path)
+                self._last_use = time.monotonic()
+                res = self._cloud.query(img, question)
+                return (res or {}).get("answer")
+        except Exception:
+            return None
+        return None
+
     def status(self) -> dict:
         with self._lock:
             return {
