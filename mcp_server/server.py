@@ -68,12 +68,14 @@ from core import (cascade, intent, router, vision, verify, session, repl,
                   clipboard as _clipboard, files as _files,
                   calendar as _calendar,
                   notify as _notify, voice as _voice,
-                  browser_nav as _bnav, pdf as _pdf)
+                  browser_nav as _bnav, pdf as _pdf,
+                  web_search as _wsearch, mail as _mail,
+                  imessage as _imsg)
 from adapters import ax, ocr, cdp, cdp_raw, cgevent
 
 PROTO_VERSION = "2024-11-05"
 SERVER_NAME = "argus"
-SERVER_VERSION = "1.2.0"
+SERVER_VERSION = "1.3.0"
 
 WORKFLOWS_DIR = os.path.join(ROOT, "app-skills", "workflows")
 
@@ -323,6 +325,45 @@ TOOLS = [
          "name": {"type": "string"},
          "kind": {"type": "string", "enum": ["auto", "native", "web"], "default": "auto"}
      }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_search_web",
+     "description": "Web search via DuckDuckGo HTML (no API key). Returns top results with title + url + snippet.",
+     "inputSchema": {"type": "object", "properties": {
+         "query": {"type": "string"},
+         "max_results": {"type": "integer", "default": 10}
+     }, "required": ["query"], "additionalProperties": False}},
+
+    {"name": "argus_mail",
+     "description": "Apple Mail compose / send. send_now=true requires confirmed=true (anti-misfire).",
+     "inputSchema": {"type": "object", "properties": {
+         "to": {"type": "string"},
+         "subject": {"type": "string"},
+         "body": {"type": "string"},
+         "cc": {"type": "string"},
+         "bcc": {"type": "string"},
+         "send_now": {"type": "boolean", "default": False},
+         "confirmed": {"type": "boolean", "default": False}
+     }, "required": ["to", "subject", "body"], "additionalProperties": False}},
+
+    {"name": "argus_imessage",
+     "description": "Send iMessage via Messages.app. Requires confirmed=true (anti-misfire safety).",
+     "inputSchema": {"type": "object", "properties": {
+         "to": {"type": "string"},
+         "text": {"type": "string"},
+         "service": {"type": "string", "default": "iMessage"},
+         "confirmed": {"type": "boolean", "default": False}
+     }, "required": ["to", "text"], "additionalProperties": False}},
+
+    {"name": "argus_calendar_create",
+     "description": "Create a Calendar event. start_date/end_date as AppleScript date strings (e.g. 'tomorrow at 3pm').",
+     "inputSchema": {"type": "object", "properties": {
+         "summary": {"type": "string"},
+         "start_date": {"type": "string"},
+         "end_date": {"type": "string"},
+         "calendar_name": {"type": "string"},
+         "notes": {"type": "string", "default": ""},
+         "location": {"type": "string", "default": ""}
+     }, "required": ["summary", "start_date", "end_date"], "additionalProperties": False}},
 
     {"name": "argus_notify",
      "description": "macOS native notification. Optional subtitle, sound (e.g. 'Glass', 'Ping').",
@@ -1099,6 +1140,33 @@ def tool_argus_skills(args):
             return _text({"error": "name required"})
         return _text(registry.install(args["name"], kind=args.get("kind", "auto")))
     return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_search_web(args):
+    return _text(_wsearch.search(args["query"],
+                                   max_results=int(args.get("max_results", 10))))
+
+
+def tool_argus_mail(args):
+    return _text(_mail.send(args["to"], args["subject"], args["body"],
+                              cc=args.get("cc"), bcc=args.get("bcc"),
+                              send_now=bool(args.get("send_now", False)),
+                              confirmed=bool(args.get("confirmed", False))))
+
+
+def tool_argus_imessage(args):
+    return _text(_imsg.send(args["to"], args["text"],
+                              service=args.get("service", "iMessage"),
+                              confirmed=bool(args.get("confirmed", False))))
+
+
+def tool_argus_calendar_create(args):
+    return _text(_calendar.create_event(args["summary"],
+                                          start_date=args["start_date"],
+                                          end_date=args["end_date"],
+                                          calendar_name=args.get("calendar_name"),
+                                          notes=args.get("notes", ""),
+                                          location=args.get("location", "")))
 
 
 def tool_argus_notify(args):

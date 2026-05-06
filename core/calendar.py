@@ -56,3 +56,23 @@ def upcoming(hours: int = 24, max_events: int = 20) -> dict:
                 continue
     return {"ok": True, "hours": hours, "count": len(events),
             "events": events[:max_events]}
+
+
+def create_event(summary: str, *, start_date: str, end_date: str,
+                  calendar_name: str | None = None,
+                  notes: str = "", location: str = "") -> dict:
+    """Create an event. Dates as AppleScript date strings (e.g. 'tomorrow at 3pm')."""
+    cal_clause = f'calendar "{calendar_name}"' if calendar_name else 'first calendar'
+    script = f'''
+    tell application "Calendar"
+      tell {cal_clause}
+        set newEvent to make new event with properties {{summary:"{summary}", start date:date "{start_date}", end date:date "{end_date}", description:"{notes}", location:"{location}"}}
+        return uid of newEvent
+      end tell
+    end tell
+    '''
+    res = safety.safe_exec_apple_script(script, timeout=15)
+    return {"ok": res.get("ok", False), "summary": summary,
+            "start_date": start_date, "end_date": end_date,
+            "uid": (res.get("stdout") or "").strip(),
+            "stderr": res.get("stderr")}
