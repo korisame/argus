@@ -82,6 +82,48 @@ MACROS = {
     "submit_form": [   # most web forms accept Enter on a focused submit button
         {"op": "key", "args": {"name": "Return"}},
     ],
+    # ── Window / desktop management ──
+    "mission_control": [
+        {"op": "key", "args": {"name": "Up", "modifiers": "ctrl"}},
+    ],
+    "exposé_app_windows": [
+        {"op": "key", "args": {"name": "Down", "modifiers": "ctrl"}},
+    ],
+    "show_desktop": [
+        {"op": "key", "args": {"name": "F11"}},
+    ],
+    "next_desktop": [
+        {"op": "key", "args": {"name": "Right", "modifiers": "ctrl"}},
+    ],
+    "prev_desktop": [
+        {"op": "key", "args": {"name": "Left", "modifiers": "ctrl"}},
+    ],
+    "zoom_in": [
+        {"op": "key", "args": {"name": "Plus", "modifiers": "cmd"}},
+    ],
+    "zoom_out": [
+        {"op": "key", "args": {"name": "Minus", "modifiers": "cmd"}},
+    ],
+    # ── Finder ──
+    "finder_new_folder": [
+        {"op": "key", "args": {"name": "n", "modifiers": "shift+cmd"}},
+    ],
+    "finder_open_selected": [
+        {"op": "key", "args": {"name": "o", "modifiers": "cmd"}},
+    ],
+    "finder_quick_look": [
+        {"op": "key", "args": {"name": "Space"}},
+    ],
+    "finder_get_info": [
+        {"op": "key", "args": {"name": "i", "modifiers": "cmd"}},
+    ],
+    # ── Print / share ──
+    "print_dialog": [
+        {"op": "key", "args": {"name": "p", "modifiers": "cmd"}},
+    ],
+    "preferences": [
+        {"op": "key", "args": {"name": "comma", "modifiers": "cmd"}},
+    ],
 }
 
 

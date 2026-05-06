@@ -64,12 +64,14 @@ from core import (cascade, intent, router, vision, verify, session, repl,
                   apple_apps, diff_screens, macros,
                   benchmark, health, chain as _chain,
                   workspace as _workspace, predict as _predict,
-                  quickstart as _quickstart)
+                  quickstart as _quickstart,
+                  clipboard as _clipboard, files as _files,
+                  calendar as _calendar)
 from adapters import ax, ocr, cdp, cdp_raw, cgevent
 
 PROTO_VERSION = "2024-11-05"
 SERVER_NAME = "argus"
-SERVER_VERSION = "1.0.0"
+SERVER_VERSION = "1.1.0"
 
 WORKFLOWS_DIR = os.path.join(ROOT, "app-skills", "workflows")
 
@@ -319,6 +321,36 @@ TOOLS = [
          "name": {"type": "string"},
          "kind": {"type": "string", "enum": ["auto", "native", "web"], "default": "auto"}
      }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_clipboard",
+     "description": "Clipboard read/write/history. action ∈ {read_text, read_image, write_text, history, clear_history}.",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string", "enum": ["read_text", "read_image", "write_text", "history", "clear_history"]},
+         "text": {"type": "string"},
+         "out_path": {"type": "string", "default": "/tmp/argus_clipboard.png"},
+         "limit": {"type": "integer", "default": 20}
+     }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_files",
+     "description": "Filesystem ops with policy guards (blocks /System, /usr/bin, etc. unless allow_unsafe). action ∈ {read, write, delete, move, copy, list, exists}.",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string", "enum": ["read", "write", "delete", "move", "copy", "list", "exists"]},
+         "path": {"type": "string"},
+         "src": {"type": "string"},
+         "dst": {"type": "string"},
+         "content": {"type": "string"},
+         "allow_unsafe": {"type": "boolean", "default": False},
+         "recursive": {"type": "boolean", "default": False},
+         "max_bytes": {"type": "integer", "default": 10485760},
+         "max_entries": {"type": "integer", "default": 200}
+     }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_calendar",
+     "description": "Read upcoming events from Apple Calendar. Doesn't write — read-only. Caps at max_events.",
+     "inputSchema": {"type": "object", "properties": {
+         "hours": {"type": "integer", "default": 24},
+         "max_events": {"type": "integer", "default": 20}
+     }, "additionalProperties": False}},
 
     {"name": "argus_quickstart",
      "description": "Interactive try-it-now for new agents. Returns 5 example tool invocations with expected output shape + common workflows + tips. Call this once when you first see argus to learn the patterns.",
@@ -1018,6 +1050,38 @@ def tool_argus_skills(args):
             return _text({"error": "name required"})
         return _text(registry.install(args["name"], kind=args.get("kind", "auto")))
     return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_clipboard(args):
+    action = args["action"]
+    if action == "read_text":      return _text(_clipboard.read_text())
+    if action == "read_image":     return _text(_clipboard.read_image(args.get("out_path", "/tmp/argus_clipboard.png")))
+    if action == "write_text":     return _text(_clipboard.write_text(args["text"]))
+    if action == "history":        return _text({"history": _clipboard.history(int(args.get("limit", 20)))})
+    if action == "clear_history":  return _text(_clipboard.clear_history())
+    return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_files(args):
+    action = args["action"]
+    if action == "read":   return _text(_files.read(args["path"], max_bytes=int(args.get("max_bytes", 10485760))))
+    if action == "write":  return _text(_files.write(args["path"], args.get("content", ""),
+                                                       allow_unsafe=bool(args.get("allow_unsafe", False))))
+    if action == "delete": return _text(_files.delete(args["path"],
+                                                        allow_unsafe=bool(args.get("allow_unsafe", False)),
+                                                        recursive=bool(args.get("recursive", False))))
+    if action == "move":   return _text(_files.move(args["src"], args["dst"],
+                                                       allow_unsafe=bool(args.get("allow_unsafe", False))))
+    if action == "copy":   return _text(_files.copy(args["src"], args["dst"],
+                                                      allow_unsafe=bool(args.get("allow_unsafe", False))))
+    if action == "list":   return _text(_files.list_dir(args["path"], max_entries=int(args.get("max_entries", 200))))
+    if action == "exists": return _text(_files.exists(args["path"]))
+    return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_calendar(args):
+    return _text(_calendar.upcoming(hours=int(args.get("hours", 24)),
+                                      max_events=int(args.get("max_events", 20))))
 
 
 def tool_argus_quickstart(_):
