@@ -58,22 +58,31 @@ def _walk_menu(elem, depth=0, out: Optional[list] = None):
 
 
 def explore(app_name: str, *, write_skill: bool = True,
-            settle_s: float = 1.5) -> dict:
+            settle_s: float = 1.5, max_wait_s: float = 8.0) -> dict:
     if not HAVE_AX:
         return {"ok": False, "error": _ERR}
     import subprocess
     subprocess.run(["open", "-a", app_name], check=False, timeout=10)
-    time.sleep(settle_s)
-
-    # Find PID + bundle id of the launched app
-    apps = NSWorkspace.sharedWorkspace().runningApplications()
+    # Poll for the app to appear in NSWorkspace, up to max_wait_s
     target = None
-    for a in apps:
-        if (a.localizedName() or "").lower() == app_name.lower():
-            target = a
+    deadline = time.monotonic() + max_wait_s
+    needle = app_name.lower()
+    while time.monotonic() < deadline:
+        time.sleep(min(0.5, max(0.2, deadline - time.monotonic())))
+        apps = NSWorkspace.sharedWorkspace().runningApplications()
+        for a in apps:
+            name = (a.localizedName() or "").lower()
+            bid = (a.bundleIdentifier() or "").lower()
+            if name == needle or needle in name or needle in bid:
+                target = a
+                break
+        if target:
+            time.sleep(0.5)  # let menu bar populate
             break
     if not target:
-        return {"ok": False, "error": f"app not running: {app_name}"}
+        return {"ok": False,
+                "error": f"app not running after {max_wait_s}s: {app_name}",
+                "hint": "Pass max_wait_s higher, or check the localized name (e.g. 'Calcolatrice' on Italian macOS)."}
     pid = int(target.processIdentifier())
     bundle = str(target.bundleIdentifier() or "")
 

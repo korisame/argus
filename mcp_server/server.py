@@ -75,12 +75,13 @@ from core import (cascade, intent, router, vision, verify, session, repl,
                   http_client as _http, json_query as _jq, sql as _sql,
                   image_ops as _img,
                   text_search as _tsearch, smart_click as _sc,
-                  app_explore as _explore, redact as _redact, focus as _focus)
+                  app_explore as _explore, redact as _redact, focus as _focus,
+                  drag as _drag, system_ctl as _sys)
 from adapters import ax, ocr, cdp, cdp_raw, cgevent
 
 PROTO_VERSION = "2024-11-05"
 SERVER_NAME = "argus"
-SERVER_VERSION = "1.7.0"
+SERVER_VERSION = "1.8.0"
 
 WORKFLOWS_DIR = os.path.join(ROOT, "app-skills", "workflows")
 
@@ -329,6 +330,23 @@ TOOLS = [
          "action": {"type": "string", "enum": ["index", "install", "list_local"]},
          "name": {"type": "string"},
          "kind": {"type": "string", "enum": ["auto", "native", "web"], "default": "auto"}
+     }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_drag",
+     "description": "Mouse drag from (x1,y1) to (x2,y2) via CGEvent. button ∈ {left, right}. Optional duration + steps for human-like timing.",
+     "inputSchema": {"type": "object", "properties": {
+         "x1": {"type": "number"}, "y1": {"type": "number"},
+         "x2": {"type": "number"}, "y2": {"type": "number"},
+         "duration": {"type": "number", "default": 0.4},
+         "steps": {"type": "integer", "default": 20},
+         "button": {"type": "string", "enum": ["left", "right"], "default": "left"}
+     }, "required": ["x1", "y1", "x2", "y2"], "additionalProperties": False}},
+
+    {"name": "argus_system",
+     "description": "macOS system controls. action ∈ {lock, sleep, logout, restart, shutdown}. ALL require confirmed=true (anti-misfire). Audit logged.",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string", "enum": ["lock", "sleep", "logout", "restart", "shutdown"]},
+         "confirmed": {"type": "boolean", "default": False}
      }, "required": ["action"], "additionalProperties": False}},
 
     {"name": "argus_app_explore",
@@ -1276,6 +1294,25 @@ def tool_argus_skills(args):
         if not args.get("name"):
             return _text({"error": "name required"})
         return _text(registry.install(args["name"], kind=args.get("kind", "auto")))
+    return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_drag(args):
+    return _text(_drag.drag(float(args["x1"]), float(args["y1"]),
+                              float(args["x2"]), float(args["y2"]),
+                              duration=float(args.get("duration", 0.4)),
+                              steps=int(args.get("steps", 20)),
+                              button=args.get("button", "left")))
+
+
+def tool_argus_system(args):
+    action = args["action"]
+    confirmed = bool(args.get("confirmed", False))
+    if action == "lock":     return _text(_sys.lock_screen(confirmed=confirmed))
+    if action == "sleep":    return _text(_sys.sleep(confirmed=confirmed))
+    if action == "logout":   return _text(_sys.logout(confirmed=confirmed))
+    if action == "restart":  return _text(_sys.restart(confirmed=confirmed))
+    if action == "shutdown": return _text(_sys.shutdown(confirmed=confirmed))
     return _text({"error": f"unknown action: {action}"})
 
 
