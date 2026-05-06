@@ -79,12 +79,13 @@ from core import (cascade, intent, router, vision, verify, session, repl,
                   drag as _drag, system_ctl as _sys,
                   contacts as _contacts, qr as _qr,
                   translate as _trans, screenshot_history as _sh,
-                  summary as _summary, observe as _observe)
+                  summary as _summary, observe as _observe,
+                  browser_advanced as _badv)
 from adapters import ax, ocr, cdp, cdp_raw, cgevent
 
 PROTO_VERSION = "2024-11-05"
 SERVER_NAME = "argus"
-SERVER_VERSION = "2.0.0"
+SERVER_VERSION = "2.1.0"
 
 WORKFLOWS_DIR = os.path.join(ROOT, "app-skills", "workflows")
 
@@ -334,6 +335,44 @@ TOOLS = [
          "name": {"type": "string"},
          "kind": {"type": "string", "enum": ["auto", "native", "web"], "default": "auto"}
      }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_cookies",
+     "description": "Chrome cookies via CDP. action ∈ {get, set, clear}.",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string", "enum": ["get", "set", "clear"]},
+         "name": {"type": "string"}, "value": {"type": "string"},
+         "domain": {"type": "string"}, "path": {"type": "string", "default": "/"},
+         "secure": {"type": "boolean", "default": False},
+         "http_only": {"type": "boolean", "default": False},
+         "expires": {"type": "number"},
+         "urls": {"type": "array", "items": {"type": "string"}}
+     }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_localstorage",
+     "description": "Chrome localStorage via CDP. action ∈ {get, set, clear}.",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string", "enum": ["get", "set", "clear"]},
+         "key": {"type": "string"}, "value": {"type": "string"}
+     }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_emulate",
+     "description": "Device emulation via CDP. action ∈ {set, clear}. set: width/height/mobile/user_agent.",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string", "enum": ["set", "clear"]},
+         "width": {"type": "integer"},
+         "height": {"type": "integer"},
+         "device_scale_factor": {"type": "number", "default": 2.0},
+         "mobile": {"type": "boolean", "default": True},
+         "user_agent": {"type": "string"}
+     }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_pdf_export",
+     "description": "Print current Chrome tab to PDF via CDP.",
+     "inputSchema": {"type": "object", "properties": {
+         "out_path": {"type": "string", "default": "/tmp/argus_page.pdf"},
+         "landscape": {"type": "boolean", "default": False},
+         "scale": {"type": "number", "default": 1.0}
+     }, "additionalProperties": False}},
 
     {"name": "argus_summary",
      "description": "1-line + structured snapshot: surface, frontmost app, top-3 tools, vision mode, cache size, last 5 ok intents.",
@@ -1347,6 +1386,44 @@ def tool_argus_skills(args):
             return _text({"error": "name required"})
         return _text(registry.install(args["name"], kind=args.get("kind", "auto")))
     return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_cookies(args):
+    action = args["action"]
+    if action == "get":   return _text(_badv.cookies_get(urls=args.get("urls")))
+    if action == "set":   return _text(_badv.cookies_set(args["name"], args["value"],
+                                                            domain=args["domain"],
+                                                            path=args.get("path", "/"),
+                                                            secure=bool(args.get("secure", False)),
+                                                            http_only=bool(args.get("http_only", False)),
+                                                            expires=args.get("expires")))
+    if action == "clear": return _text(_badv.cookies_clear(domain=args.get("domain")))
+    return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_localstorage(args):
+    action = args["action"]
+    if action == "get":   return _text(_badv.localstorage_get(args.get("key")))
+    if action == "set":   return _text(_badv.localstorage_set(args["key"], args["value"]))
+    if action == "clear": return _text(_badv.localstorage_clear())
+    return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_emulate(args):
+    action = args["action"]
+    if action == "set":
+        return _text(_badv.emulate_device(width=int(args["width"]), height=int(args["height"]),
+                                             device_scale_factor=float(args.get("device_scale_factor", 2.0)),
+                                             mobile=bool(args.get("mobile", True)),
+                                             user_agent=args.get("user_agent")))
+    if action == "clear": return _text(_badv.emulate_clear())
+    return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_pdf_export(args):
+    return _text(_badv.print_to_pdf(out_path=args.get("out_path", "/tmp/argus_page.pdf"),
+                                       landscape=bool(args.get("landscape", False)),
+                                       scale=float(args.get("scale", 1.0))))
 
 
 def tool_argus_summary(_):
