@@ -1,0 +1,24 @@
+{
+  "name": "gmail_compose",
+  "scope": "web:mail.google.com",
+  "description": "Compose a new email with To, Subject, Body via Gmail keyboard shortcuts.",
+  "vars": {
+    "to": "someone@example.com",
+    "subject": "Hello",
+    "body": "Body text"
+  },
+  "steps": [
+    {"do": "open_app", "args": {"name": "Google Chrome"}},
+    {"do": "wait_for", "args": {"target": "mail.google.com", "timeout_s": 8}},
+    {"do": "key", "args": {"name": "c"}},
+    {"do": "wait_for", "args": {"target": "New Message", "timeout_s": 5}},
+    {"do": "type", "args": {"text": "{{to}}"}},
+    {"do": "key", "args": {"name": "Tab"}},
+    {"do": "key", "args": {"name": "Tab"}},
+    {"do": "type", "args": {"text": "{{subject}}"}},
+    {"do": "key", "args": {"name": "Tab"}},
+    {"do": "paste", "args": {"text": "{{body}}"}}
+  ],
+  "on_error": "continue",
+  "post": "Confirm to send via Cmd+Return only if the user explicitly approves."
+}

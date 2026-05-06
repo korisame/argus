@@ -1,0 +1,14 @@
+{
+  "name": "github_search_repo",
+  "scope": "web:github.com",
+  "description": "Search for a repo on github.com via the global '/' shortcut.",
+  "vars": {"query": "argus"},
+  "steps": [
+    {"do": "open_app", "args": {"name": "Google Chrome"}},
+    {"do": "wait_for", "args": {"target": "github.com", "timeout_s": 8}},
+    {"do": "key", "args": {"name": "/"}},
+    {"do": "type", "args": {"text": "{{query}}"}},
+    {"do": "key", "args": {"name": "Return"}}
+  ],
+  "on_error": "abort"
+}

@@ -1,0 +1,20 @@
+{
+  "name": "post_to_notion",
+  "scope": "web:www.notion.so",
+  "description": "Open Notion in Chrome, create a new page in the current workspace, type title + body, save.",
+  "vars": {
+    "title": "New page",
+    "body": "Page content"
+  },
+  "steps": [
+    {"do": "open_app", "args": {"name": "Google Chrome"}},
+    {"do": "wait_for", "args": {"target": "Notion", "timeout_s": 8}},
+    {"do": "send_keys", "args": {"combo": "cmd+p"}},
+    {"do": "type", "args": {"text": "{{title}}"}},
+    {"do": "key", "args": {"name": "Return"}},
+    {"do": "wait_for", "args": {"target": "{{title}}", "timeout_s": 5}},
+    {"do": "type", "args": {"text": "{{body}}"}},
+    {"do": "send_keys", "args": {"combo": "cmd+s"}}
+  ],
+  "on_error": "abort"
+}

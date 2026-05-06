@@ -1,0 +1,20 @@
+{
+  "name": "linear_new_issue",
+  "scope": "web:linear.app",
+  "description": "Create a new issue in Linear via the 'c' shortcut.",
+  "vars": {
+    "title": "Issue title",
+    "description": "Issue description"
+  },
+  "steps": [
+    {"do": "open_app", "args": {"name": "Google Chrome"}},
+    {"do": "wait_for", "args": {"target": "linear.app", "timeout_s": 8}},
+    {"do": "key", "args": {"name": "c"}},
+    {"do": "wait_for", "args": {"target": "Title", "timeout_s": 5}},
+    {"do": "type", "args": {"text": "{{title}}"}},
+    {"do": "key", "args": {"name": "Tab"}},
+    {"do": "paste", "args": {"text": "{{description}}"}},
+    {"do": "send_keys", "args": {"combo": "cmd+Return"}}
+  ],
+  "on_error": "abort"
+}

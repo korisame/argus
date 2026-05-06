@@ -60,12 +60,15 @@ from core import (cascade, intent, router, vision, verify, session, repl,
                   autotune, screen, patterns, policy, prewarm, dashboard,
                   wizard, uninstall as _uninstall, chrome_admin, registry,
                   asyncio_runtime, extract, safety, secure_session,
-                  replay as _replay, workflow as _workflow)
+                  replay as _replay, workflow as _workflow,
+                  apple_apps, diff_screens, macros)
 from adapters import ax, ocr, cdp, cdp_raw, cgevent
 
 PROTO_VERSION = "2024-11-05"
 SERVER_NAME = "argus"
-SERVER_VERSION = "0.7.0"
+SERVER_VERSION = "0.8.0"
+
+WORKFLOWS_DIR = os.path.join(ROOT, "app-skills", "workflows")
 
 
 # ─── tool catalog ─────────────────────────────────────────────────────
@@ -313,6 +316,48 @@ TOOLS = [
          "name": {"type": "string"},
          "kind": {"type": "string", "enum": ["auto", "native", "web"], "default": "auto"}
      }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_macros",
+     "description": "Built-in micro-workflows. action ∈ {list, run}. run macro_name='save'|'undo'|'new_tab'|'spotlight'|... Pre-baked common UI gestures.",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string", "enum": ["list", "run"]},
+         "macro_name": {"type": "string"}
+     }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_workflow_template",
+     "description": "Load a pre-shipped workflow template by name (e.g. 'post_to_notion', 'gmail_compose'), optionally override vars, and run it.",
+     "inputSchema": {"type": "object", "properties": {
+         "name": {"type": "string"},
+         "vars": {"type": "object"},
+         "dry_run": {"type": "boolean", "default": False},
+         "list": {"type": "boolean", "default": False}
+     }, "additionalProperties": False}},
+
+    {"name": "argus_diff_screens",
+     "description": "Compare two screenshots. Returns regions of change + perceptual delta. For state monitoring.",
+     "inputSchema": {"type": "object", "properties": {
+         "path_a": {"type": "string"},
+         "path_b": {"type": "string"},
+         "threshold": {"type": "integer", "default": 30}
+     }, "required": ["path_a", "path_b"], "additionalProperties": False}},
+
+    {"name": "argus_notes",
+     "description": "Create a note in Apple Notes (with open-first pattern to avoid TCC timeout).",
+     "inputSchema": {"type": "object", "properties": {
+         "title": {"type": "string"},
+         "body": {"type": "string"},
+         "folder": {"type": "string", "default": "Notes"},
+         "account": {"type": "string"}
+     }, "required": ["title", "body"], "additionalProperties": False}},
+
+    {"name": "argus_reminders",
+     "description": "Create a reminder in Apple Reminders.",
+     "inputSchema": {"type": "object", "properties": {
+         "title": {"type": "string"},
+         "notes": {"type": "string"},
+         "list_name": {"type": "string"},
+         "due_date": {"type": "string", "description": "AppleScript date string, e.g. 'tomorrow at 9:00am'"}
+     }, "required": ["title"], "additionalProperties": False}},
 
     {"name": "argus_replay",
      "description": "Replay a saved task pattern step-by-step. Provide (scope, intent_label) — the saved sequence executes via the same argus tools that recorded it. Use after argus_pattern record_end. dry_run=true to preview.",
@@ -907,6 +952,56 @@ def tool_argus_skills(args):
             return _text({"error": "name required"})
         return _text(registry.install(args["name"], kind=args.get("kind", "auto")))
     return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_macros(args):
+    action = args["action"]
+    if action == "list":
+        return _text(macros.list_macros())
+    if action == "run":
+        if not args.get("macro_name"):
+            return _text({"error": "macro_name required"})
+        return _text(macros.run(args["macro_name"], handlers=HANDLERS))
+    return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_workflow_template(args):
+    if args.get("list"):
+        if not os.path.isdir(WORKFLOWS_DIR):
+            return _text({"templates": []})
+        names = sorted(os.path.splitext(f)[0]
+                        for f in os.listdir(WORKFLOWS_DIR)
+                        if f.endswith(".json"))
+        return _text({"templates": names})
+    name = args.get("name")
+    if not name:
+        return _text({"error": "name required (or pass list=true)"})
+    path = os.path.join(WORKFLOWS_DIR, f"{name}.json")
+    if not os.path.isfile(path):
+        return _text({"error": f"template not found: {path}"})
+    with open(path, encoding="utf-8") as f:
+        wf = json.load(f)
+    return _text(_workflow.run(wf, handlers=HANDLERS,
+                                 extra_vars=args.get("vars"),
+                                 dry_run=bool(args.get("dry_run", False))))
+
+
+def tool_argus_diff_screens(args):
+    return _text(diff_screens.compare(args["path_a"], args["path_b"],
+                                       threshold=int(args.get("threshold", 30))))
+
+
+def tool_argus_notes(args):
+    return _text(apple_apps.create_note(args["title"], args["body"],
+                                          folder=args.get("folder", "Notes"),
+                                          account=args.get("account")))
+
+
+def tool_argus_reminders(args):
+    return _text(apple_apps.create_reminder(args["title"],
+                                              notes=args.get("notes", ""),
+                                              list_name=args.get("list_name"),
+                                              due_date=args.get("due_date")))
 
 
 def tool_argus_replay(args):
