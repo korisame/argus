@@ -63,12 +63,13 @@ from core import (cascade, intent, router, vision, verify, session, repl,
                   replay as _replay, workflow as _workflow,
                   apple_apps, diff_screens, macros,
                   benchmark, health, chain as _chain,
-                  workspace as _workspace, predict as _predict)
+                  workspace as _workspace, predict as _predict,
+                  quickstart as _quickstart)
 from adapters import ax, ocr, cdp, cdp_raw, cgevent
 
 PROTO_VERSION = "2024-11-05"
 SERVER_NAME = "argus"
-SERVER_VERSION = "0.10.0"
+SERVER_VERSION = "1.0.0"
 
 WORKFLOWS_DIR = os.path.join(ROOT, "app-skills", "workflows")
 
@@ -318,6 +319,10 @@ TOOLS = [
          "name": {"type": "string"},
          "kind": {"type": "string", "enum": ["auto", "native", "web"], "default": "auto"}
      }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_quickstart",
+     "description": "Interactive try-it-now for new agents. Returns 5 example tool invocations with expected output shape + common workflows + tips. Call this once when you first see argus to learn the patterns.",
+     "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
 
     {"name": "argus_chain",
      "description": "Composable tool pipeline. steps=[{tool, args, [as]}]. Output of each step bound to {{prev}} or {{step_N}}/{{as}} for subsequent steps. Use to fuse multi-step ops into one MCP call.",
@@ -1013,6 +1018,10 @@ def tool_argus_skills(args):
             return _text({"error": "name required"})
         return _text(registry.install(args["name"], kind=args.get("kind", "auto")))
     return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_quickstart(_):
+    return _text(_quickstart.quickstart())
 
 
 def tool_argus_chain(args):

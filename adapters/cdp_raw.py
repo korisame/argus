@@ -79,7 +79,24 @@ class _CDPClient:
             ws_url = t.get("webSocketDebuggerUrl")
             if not ws_url:
                 return False
-            self._ws = websocket.create_connection(ws_url, timeout=8)
+            # Chrome 130+ rejects WS handshakes whose Origin header points to
+            # the debug port itself (anti-CSRF). Override with a Chrome-allowed
+            # origin (devtools://) so the handshake succeeds.
+            try:
+                self._ws = websocket.create_connection(
+                    ws_url, timeout=8,
+                    origin="devtools://devtools",
+                )
+            except Exception:
+                # Fallback: chrome-extension scheme (also whitelisted)
+                try:
+                    self._ws = websocket.create_connection(
+                        ws_url, timeout=8,
+                        origin="chrome-extension://argus",
+                    )
+                except Exception:
+                    # Last-resort: default Origin (works on older Chrome)
+                    self._ws = websocket.create_connection(ws_url, timeout=8)
             self._target_id = t.get("id")
             return True
 
