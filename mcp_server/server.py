@@ -74,12 +74,13 @@ from core import (cascade, intent, router, vision, verify, session, repl,
                   git_ops as _git, scheduler as _sched, archive as _arch,
                   http_client as _http, json_query as _jq, sql as _sql,
                   image_ops as _img,
-                  text_search as _tsearch, smart_click as _sc)
+                  text_search as _tsearch, smart_click as _sc,
+                  app_explore as _explore, redact as _redact, focus as _focus)
 from adapters import ax, ocr, cdp, cdp_raw, cgevent
 
 PROTO_VERSION = "2024-11-05"
 SERVER_NAME = "argus"
-SERVER_VERSION = "1.6.0"
+SERVER_VERSION = "1.7.0"
 
 WORKFLOWS_DIR = os.path.join(ROOT, "app-skills", "workflows")
 
@@ -329,6 +330,35 @@ TOOLS = [
          "name": {"type": "string"},
          "kind": {"type": "string", "enum": ["auto", "native", "web"], "default": "auto"}
      }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_app_explore",
+     "description": "Auto-discover an app's UI: opens it, walks its menu bar via AX, extracts all keyboard shortcuts, writes a draft app-skill markdown. For unknown apps, faster than reading docs.",
+     "inputSchema": {"type": "object", "properties": {
+         "app_name": {"type": "string"},
+         "write_skill": {"type": "boolean", "default": True},
+         "settle_s": {"type": "number", "default": 1.5}
+     }, "required": ["app_name"], "additionalProperties": False}},
+
+    {"name": "argus_redact",
+     "description": "Privacy filter: detect+blur emails, credit cards, SSNs, phones, IBANs, API keys in a screenshot. method ∈ {blur, blackout}.",
+     "inputSchema": {"type": "object", "properties": {
+         "input_path": {"type": "string"},
+         "out_path": {"type": "string"},
+         "kinds": {"type": "array", "items": {"type": "string"},
+                     "description": "subset of: email, credit_card, ssn_us, phone, iban, api_key. Default: all."},
+         "method": {"type": "string", "enum": ["blur", "blackout"], "default": "blur"},
+         "blur_radius": {"type": "integer", "default": 12}
+     }, "required": ["input_path"], "additionalProperties": False}},
+
+    {"name": "argus_focus",
+     "description": "Bring an app or specific window to the front. action ∈ {app, window}. window can match by app+title, bundle_id, or wid.",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string", "enum": ["app", "window"], "default": "app"},
+         "app_name": {"type": "string"},
+         "title": {"type": "string"},
+         "bundle_id": {"type": "string"},
+         "wid": {"type": "integer"}
+     }, "additionalProperties": False}},
 
     {"name": "argus_text_search",
      "description": "Search a substring across all visible windows (foreground+background). Returns matches with bbox in screen coords + window metadata.",
@@ -1246,6 +1276,32 @@ def tool_argus_skills(args):
         if not args.get("name"):
             return _text({"error": "name required"})
         return _text(registry.install(args["name"], kind=args.get("kind", "auto")))
+    return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_app_explore(args):
+    return _text(_explore.explore(args["app_name"],
+                                     write_skill=bool(args.get("write_skill", True)),
+                                     settle_s=float(args.get("settle_s", 1.5))))
+
+
+def tool_argus_redact(args):
+    return _text(_redact.redact(args["input_path"],
+                                   out_path=args.get("out_path"),
+                                   kinds=args.get("kinds"),
+                                   method=args.get("method", "blur"),
+                                   blur_radius=int(args.get("blur_radius", 12))))
+
+
+def tool_argus_focus(args):
+    action = args.get("action", "app")
+    if action == "app":
+        return _text(_focus.focus_app(args["app_name"]))
+    if action == "window":
+        return _text(_focus.focus_window(app=args.get("app_name"),
+                                            title=args.get("title"),
+                                            bundle_id=args.get("bundle_id"),
+                                            wid=args.get("wid")))
     return _text({"error": f"unknown action: {action}"})
 
 
