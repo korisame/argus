@@ -3,7 +3,7 @@
     "argus": {
       "command": "python3",
       "args": ["${CLAUDE_PLUGIN_ROOT}/mcp_server/server.py"],
-      "env": {"ARGUS_VERSION": "0.6.0"}
+      "env": {"ARGUS_VERSION": "0.7.0"}
     }
   }
 }

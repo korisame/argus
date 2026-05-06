@@ -31,4 +31,3 @@ env/
 .env.local
 *.log
 /tmp/
-.github/

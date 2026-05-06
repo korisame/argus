@@ -59,12 +59,13 @@ _DOTENV_INFO = _load_dotenv()
 from core import (cascade, intent, router, vision, verify, session, repl,
                   autotune, screen, patterns, policy, prewarm, dashboard,
                   wizard, uninstall as _uninstall, chrome_admin, registry,
-                  asyncio_runtime, extract, safety, secure_session)
+                  asyncio_runtime, extract, safety, secure_session,
+                  replay as _replay, workflow as _workflow)
 from adapters import ax, ocr, cdp, cdp_raw, cgevent
 
 PROTO_VERSION = "2024-11-05"
 SERVER_NAME = "argus"
-SERVER_VERSION = "0.6.0"
+SERVER_VERSION = "0.7.0"
 
 
 # ─── tool catalog ─────────────────────────────────────────────────────
@@ -312,6 +313,24 @@ TOOLS = [
          "name": {"type": "string"},
          "kind": {"type": "string", "enum": ["auto", "native", "web"], "default": "auto"}
      }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_replay",
+     "description": "Replay a saved task pattern step-by-step. Provide (scope, intent_label) — the saved sequence executes via the same argus tools that recorded it. Use after argus_pattern record_end. dry_run=true to preview.",
+     "inputSchema": {"type": "object", "properties": {
+         "scope": {"type": "string"},
+         "intent_label": {"type": "string"},
+         "dry_run": {"type": "boolean", "default": False},
+         "step_delay_s": {"type": "number", "default": 0.25}
+     }, "required": ["scope", "intent_label"], "additionalProperties": False}},
+
+    {"name": "argus_workflow",
+     "description": "Run a declarative JSON workflow (steps + branching + variables). Higher-level than patterns. Supports {{var}} interpolation, if/then/else with vision predicate, on_error abort/continue. Pass dry_run=true to expand without executing.",
+     "inputSchema": {"type": "object", "properties": {
+         "workflow": {"type": "object",
+                       "description": "{name, scope, vars, steps:[{do, args}|{if,then,else}], on_error}"},
+         "extra_vars": {"type": "object"},
+         "dry_run": {"type": "boolean", "default": False}
+     }, "required": ["workflow"], "additionalProperties": False}},
 
     {"name": "argus_extract",
      "description": "Extract structured data from a screenshot. Pass {schema: {field_name: 'natural language description'}}. Returns {field: value, _meta:{...}}. OCR-first then Moondream Q&A. Use for scraping any site/app without an API.",
@@ -888,6 +907,20 @@ def tool_argus_skills(args):
             return _text({"error": "name required"})
         return _text(registry.install(args["name"], kind=args.get("kind", "auto")))
     return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_replay(args):
+    return _text(_replay.replay(args["scope"], args["intent_label"],
+                                  handlers=HANDLERS,
+                                  dry_run=bool(args.get("dry_run", False)),
+                                  step_delay_s=float(args.get("step_delay_s", 0.25))))
+
+
+def tool_argus_workflow(args):
+    return _text(_workflow.run(args["workflow"],
+                                 handlers=HANDLERS,
+                                 extra_vars=args.get("extra_vars"),
+                                 dry_run=bool(args.get("dry_run", False))))
 
 
 def tool_argus_extract(args):

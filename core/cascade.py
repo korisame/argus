@@ -120,17 +120,9 @@ def resolve(target: str,
 
     is_browser = surface.get("surface") == "browser"
 
-    # 2) AX (native + webview only — Chrome doesn't expose Cocoa text via AX)
-    if allow_ax and ax.available() and not is_browser:
-        attempts.append("ax")
-        hit = ax.find(target)
-        if hit and hit["confidence"] >= min_confidence:
-            hit["scope"] = scope
-            hit["attempts"] = attempts
-            hit["ms"] = round((time.monotonic() - t0) * 1000, 1)
-            return hit
-
-    # 3) CDP DOM (browser only)
+    # ── PARALLEL phase: AX + OCR concurrently when neither has cache ──
+    # CDP stays serial because it needs an active websocket and the result
+    # has more authority than AX/OCR for browser targets.
     if allow_cdp and is_browser and cdp.available():
         attempts.append("cdp")
         hit = cdp.find(target)
@@ -140,17 +132,29 @@ def resolve(target: str,
             hit["ms"] = round((time.monotonic() - t0) * 1000, 1)
             return hit
 
-    # 4) OCR
-    if allow_ocr and ocr.available():
-        sp = _shot()
-        if sp:
-            attempts.append("ocr")
-            hit = ocr.find(target, sp)
-            if hit and hit["confidence"] >= min_confidence:
-                hit["scope"] = scope
-                hit["attempts"] = attempts
-                hit["ms"] = round((time.monotonic() - t0) * 1000, 1)
-                return hit
+    # AX || OCR in parallel for native/webview, OCR-only for browser
+    import concurrent.futures
+    futures = {}
+    sp_for_ocr = None
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        if allow_ax and ax.available() and not is_browser:
+            attempts.append("ax")
+            futures["ax"] = pool.submit(ax.find, target)
+        if allow_ocr and ocr.available():
+            sp_for_ocr = _shot()
+            if sp_for_ocr:
+                attempts.append("ocr")
+                futures["ocr"] = pool.submit(ocr.find, target, sp_for_ocr)
+        # AX is usually faster: check it first when both ready
+        results = {k: f.result() for k, f in futures.items()}
+    # Pick best deterministic hit above threshold (AX wins ties — more reliable)
+    for source in ("ax", "ocr"):
+        hit = results.get(source)
+        if hit and hit.get("confidence", 0) >= min_confidence:
+            hit["scope"] = scope
+            hit["attempts"] = attempts
+            hit["ms"] = round((time.monotonic() - t0) * 1000, 1)
+            return hit
 
     # 5) Vision
     if allow_vision:

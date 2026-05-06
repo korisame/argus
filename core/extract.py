@@ -92,6 +92,32 @@ def _vision_query(screenshot_path: str, question: str) -> Optional[str]:
     return None
 
 
+def _dom_extract_if_browser(schema: dict) -> Optional[dict]:
+    """Fast path: when in browser, ask the DOM directly via cdp_raw.evaluate.
+    Returns a dict {field: value} for the fields it could resolve, or None
+    if not in a browser / cdp_raw not available.
+    """
+    try:
+        from . import router as _router
+        from adapters import cdp_raw
+    except Exception:
+        return None
+    if _router.detect().get("surface") != "browser":
+        return None
+    if not cdp_raw.available():
+        return None
+    # Build a JS that returns body.innerText (full visible text)
+    text = cdp_raw.evaluate("document.body ? document.body.innerText : ''")
+    if not isinstance(text, str) or not text:
+        return None
+    out: dict = {}
+    for field, desc in schema.items():
+        v = _ocr_match(field, str(desc), text)
+        if v is not None:
+            out[field] = v
+    return out
+
+
 def extract(schema: dict, screenshot_path: Optional[str] = None,
             window_app: Optional[str] = None) -> dict:
     """Extract fields described in `schema` from the current screen / a window.
@@ -100,6 +126,13 @@ def extract(schema: dict, screenshot_path: Optional[str] = None,
             hint for what to extract.
     Returns: {field_name: value | None, _meta: {ocr_used, vision_used, missing}}
     """
+    # 0. Browser fast-path via DOM (avoids screenshot+OCR entirely)
+    dom_hit = _dom_extract_if_browser(schema)
+    if dom_hit and len(dom_hit) == len(schema):
+        return {**dom_hit,
+                "_meta": {"path": "dom_fast", "missing": [],
+                           "ocr_used": False, "vision_calls": 0}}
+
     # 1. Get a screenshot
     if not screenshot_path:
         if window_app:
