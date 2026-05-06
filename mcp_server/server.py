@@ -83,12 +83,13 @@ from core import (cascade, intent, router, vision, verify, session, repl,
                   browser_advanced as _badv,
                   log_search as _lsearch, skills_export as _sexport,
                   help as _help,
-                  download as _dl, archive_ops as _aops, text_diff as _tdiff)
+                  download as _dl, archive_ops as _aops, text_diff as _tdiff,
+                  camera as _camera, system_misc as _smisc)
 from adapters import ax, ocr, cdp, cdp_raw, cgevent
 
 PROTO_VERSION = "2024-11-05"
 SERVER_NAME = "argus"
-SERVER_VERSION = "2.3.0"
+SERVER_VERSION = "2.4.0"
 
 WORKFLOWS_DIR = os.path.join(ROOT, "app-skills", "workflows")
 
@@ -338,6 +339,38 @@ TOOLS = [
          "name": {"type": "string"},
          "kind": {"type": "string", "enum": ["auto", "native", "web"], "default": "auto"}
      }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_camera",
+     "description": "Webcam single frame. action ∈ {capture, list_devices}. Needs imagesnap (brew install imagesnap) or ffmpeg.",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string", "enum": ["capture", "list_devices"], "default": "capture"},
+         "out_path": {"type": "string", "default": "/tmp/argus_camera.jpg"},
+         "warmup_s": {"type": "number", "default": 0.5},
+         "device": {"type": "string"}
+     }, "additionalProperties": False}},
+
+    {"name": "argus_url_open",
+     "description": "Open URL in default browser (or specific app via -a).",
+     "inputSchema": {"type": "object", "properties": {
+         "url": {"type": "string"},
+         "app": {"type": "string"}
+     }, "required": ["url"], "additionalProperties": False}},
+
+    {"name": "argus_battery",
+     "description": "Battery state via pmset. Returns {percent, charging, remaining, state}.",
+     "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
+
+    {"name": "argus_volume",
+     "description": "System audio volume. action ∈ {get, set}.",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string", "enum": ["get", "set"]},
+         "pct": {"type": "integer"},
+         "mute": {"type": "boolean"}
+     }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_network",
+     "description": "Wi-Fi SSID + RSSI + IP info.",
+     "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
 
     {"name": "argus_download",
      "description": "Download a URL to disk. Follows redirects, caps at max_bytes.",
@@ -1446,6 +1479,48 @@ def tool_argus_skills(args):
             return _text({"error": "name required"})
         return _text(registry.install(args["name"], kind=args.get("kind", "auto")))
     return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_camera(args):
+    action = args.get("action", "capture")
+    if action == "list_devices":  return _text(_camera.list_devices())
+    if action == "capture":
+        res = _camera.capture(args.get("out_path", "/tmp/argus_camera.jpg"),
+                                warmup_s=float(args.get("warmup_s", 0.5)),
+                                device=args.get("device"))
+        if not res.get("ok"):
+            return _text(res)
+        try:
+            import base64
+            with open(res["path"], "rb") as f:
+                b = f.read()
+            return [
+                {"type": "image", "data": base64.b64encode(b).decode(), "mimeType": "image/jpeg"},
+                {"type": "text", "text": json.dumps(res, default=str)},
+            ]
+        except Exception:
+            return _text(res)
+    return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_url_open(args):
+    return _text(_smisc.url_open(args["url"], app=args.get("app")))
+
+
+def tool_argus_battery(_):
+    return _text(_smisc.battery())
+
+
+def tool_argus_volume(args):
+    action = args["action"]
+    if action == "get":  return _text(_smisc.volume_get())
+    if action == "set":  return _text(_smisc.volume_set(int(args.get("pct", 50)),
+                                                            mute=args.get("mute")))
+    return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_network(_):
+    return _text(_smisc.network_info())
 
 
 def tool_argus_download(args):
