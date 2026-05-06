@@ -66,12 +66,14 @@ from core import (cascade, intent, router, vision, verify, session, repl,
                   workspace as _workspace, predict as _predict,
                   quickstart as _quickstart,
                   clipboard as _clipboard, files as _files,
-                  calendar as _calendar)
+                  calendar as _calendar,
+                  notify as _notify, voice as _voice,
+                  browser_nav as _bnav, pdf as _pdf)
 from adapters import ax, ocr, cdp, cdp_raw, cgevent
 
 PROTO_VERSION = "2024-11-05"
 SERVER_NAME = "argus"
-SERVER_VERSION = "1.1.0"
+SERVER_VERSION = "1.2.0"
 
 WORKFLOWS_DIR = os.path.join(ROOT, "app-skills", "workflows")
 
@@ -321,6 +323,53 @@ TOOLS = [
          "name": {"type": "string"},
          "kind": {"type": "string", "enum": ["auto", "native", "web"], "default": "auto"}
      }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_notify",
+     "description": "macOS native notification. Optional subtitle, sound (e.g. 'Glass', 'Ping').",
+     "inputSchema": {"type": "object", "properties": {
+         "title": {"type": "string"},
+         "message": {"type": "string", "default": ""},
+         "subtitle": {"type": "string", "default": ""},
+         "sound": {"type": "string"}
+     }, "required": ["title"], "additionalProperties": False}},
+
+    {"name": "argus_speak",
+     "description": "Text-to-speech via macOS `say`. Optional voice + rate. async_mode=true returns immediately.",
+     "inputSchema": {"type": "object", "properties": {
+         "text": {"type": "string"},
+         "voice": {"type": "string"},
+         "rate": {"type": "integer"},
+         "async_mode": {"type": "boolean", "default": False},
+         "list_voices": {"type": "boolean", "default": False}
+     }, "additionalProperties": False}},
+
+    {"name": "argus_listen",
+     "description": "Record audio (sox/ffmpeg) + optional transcription via local whisper-cpp/whisper.",
+     "inputSchema": {"type": "object", "properties": {
+         "seconds": {"type": "number", "default": 5.0},
+         "transcribe": {"type": "boolean", "default": True},
+         "out_path": {"type": "string", "default": "/tmp/argus_voice.wav"},
+         "model": {"type": "string", "default": "base"}
+     }, "additionalProperties": False}},
+
+    {"name": "argus_browser",
+     "description": "High-level browser navigation via CDP (no UI clicking). action ∈ {navigate, back, forward, reload, new_tab, close_tab, list_tabs}.",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string", "enum": ["navigate", "back", "forward", "reload",
+                                                  "new_tab", "close_tab", "list_tabs"]},
+         "url": {"type": "string"},
+         "force": {"type": "boolean", "default": False},
+         "target_id": {"type": "string"}
+     }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_pdf",
+     "description": "Extract text from a PDF. action ∈ {extract, page_count}. Tries native (pypdf) first, OCR fallback for scanned PDFs.",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string", "enum": ["extract", "page_count"], "default": "extract"},
+         "path": {"type": "string"},
+         "force_ocr": {"type": "boolean", "default": False},
+         "max_pages": {"type": "integer", "default": 50}
+     }, "required": ["action", "path"], "additionalProperties": False}},
 
     {"name": "argus_clipboard",
      "description": "Clipboard read/write/history. action ∈ {read_text, read_image, write_text, history, clear_history}.",
@@ -1049,6 +1098,54 @@ def tool_argus_skills(args):
         if not args.get("name"):
             return _text({"error": "name required"})
         return _text(registry.install(args["name"], kind=args.get("kind", "auto")))
+    return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_notify(args):
+    return _text(_notify.notify(args["title"],
+                                  message=args.get("message", ""),
+                                  subtitle=args.get("subtitle", ""),
+                                  sound=args.get("sound")))
+
+
+def tool_argus_speak(args):
+    if args.get("list_voices"):
+        return _text({"voices": _voice.list_voices()})
+    return _text(_voice.speak(args.get("text", ""),
+                                voice=args.get("voice"),
+                                rate=args.get("rate"),
+                                async_mode=bool(args.get("async_mode", False))))
+
+
+def tool_argus_listen(args):
+    res = _voice.record(seconds=float(args.get("seconds", 5.0)),
+                          out_path=args.get("out_path", "/tmp/argus_voice.wav"))
+    if not res.get("ok"):
+        return _text(res)
+    if args.get("transcribe", True):
+        tr = _voice.transcribe(res["path"], model=args.get("model", "base"))
+        res["transcription"] = tr
+    return _text(res)
+
+
+def tool_argus_browser(args):
+    action = args["action"]
+    if action == "navigate":   return _text(_bnav.navigate(args["url"]))
+    if action == "back":       return _text(_bnav.back())
+    if action == "forward":    return _text(_bnav.forward())
+    if action == "reload":     return _text(_bnav.reload(force=bool(args.get("force", False))))
+    if action == "new_tab":    return _text(_bnav.new_tab(args.get("url", "about:blank")))
+    if action == "close_tab":  return _text(_bnav.close_tab(args.get("target_id")))
+    if action == "list_tabs":  return _text(_bnav.list_tabs())
+    return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_pdf(args):
+    action = args.get("action", "extract")
+    if action == "extract":     return _text(_pdf.extract_text(args["path"],
+                                                                  force_ocr=bool(args.get("force_ocr", False)),
+                                                                  max_pages=int(args.get("max_pages", 50))))
+    if action == "page_count":  return _text(_pdf.page_count(args["path"]))
     return _text({"error": f"unknown action: {action}"})
 
 
