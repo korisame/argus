@@ -76,12 +76,14 @@ from core import (cascade, intent, router, vision, verify, session, repl,
                   image_ops as _img,
                   text_search as _tsearch, smart_click as _sc,
                   app_explore as _explore, redact as _redact, focus as _focus,
-                  drag as _drag, system_ctl as _sys)
+                  drag as _drag, system_ctl as _sys,
+                  contacts as _contacts, qr as _qr,
+                  translate as _trans, screenshot_history as _sh)
 from adapters import ax, ocr, cdp, cdp_raw, cgevent
 
 PROTO_VERSION = "2024-11-05"
 SERVER_NAME = "argus"
-SERVER_VERSION = "1.8.0"
+SERVER_VERSION = "1.9.0"
 
 WORKFLOWS_DIR = os.path.join(ROOT, "app-skills", "workflows")
 
@@ -330,6 +332,39 @@ TOOLS = [
          "action": {"type": "string", "enum": ["index", "install", "list_local"]},
          "name": {"type": "string"},
          "kind": {"type": "string", "enum": ["auto", "native", "web"], "default": "auto"}
+     }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_contacts",
+     "description": "Search Apple Contacts (read-only). Returns contacts whose name/email/phone contains the query.",
+     "inputSchema": {"type": "object", "properties": {
+         "query": {"type": "string"},
+         "max_results": {"type": "integer", "default": 10}
+     }, "required": ["query"], "additionalProperties": False}},
+
+    {"name": "argus_qr",
+     "description": "QR codes. action ∈ {generate, decode}. Generate via segno (or qrencode CLI fallback). Decode via Apple Vision barcode detection.",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string", "enum": ["generate", "decode"]},
+         "text": {"type": "string"},
+         "image_path": {"type": "string"},
+         "out_path": {"type": "string", "default": "/tmp/argus_qr.png"},
+         "scale": {"type": "integer", "default": 8}
+     }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_translate",
+     "description": "Translate text via macOS shortcuts CLI calling a user-created 'argus-translate' Shortcut. Hint included if shortcut missing.",
+     "inputSchema": {"type": "object", "properties": {
+         "text": {"type": "string"},
+         "target_lang": {"type": "string", "default": "en"}
+     }, "required": ["text"], "additionalProperties": False}},
+
+    {"name": "argus_screenshot_history",
+     "description": "In-process recent screenshot tracker. action ∈ {record, list, diff_last_two, clear}.",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string", "enum": ["record", "list", "diff_last_two", "clear"]},
+         "path": {"type": "string"},
+         "surface": {"type": "string"},
+         "limit": {"type": "integer", "default": 20}
      }, "required": ["action"], "additionalProperties": False}},
 
     {"name": "argus_drag",
@@ -1294,6 +1329,39 @@ def tool_argus_skills(args):
         if not args.get("name"):
             return _text({"error": "name required"})
         return _text(registry.install(args["name"], kind=args.get("kind", "auto")))
+    return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_contacts(args):
+    return _text(_contacts.search(args["query"],
+                                     max_results=int(args.get("max_results", 10))))
+
+
+def tool_argus_qr(args):
+    action = args["action"]
+    if action == "generate":
+        if not args.get("text"):
+            return _text({"error": "text required for generate"})
+        return _text(_qr.generate(args["text"], out_path=args.get("out_path", "/tmp/argus_qr.png"),
+                                    scale=int(args.get("scale", 8))))
+    if action == "decode":
+        if not args.get("image_path"):
+            return _text({"error": "image_path required for decode"})
+        return _text(_qr.decode(args["image_path"]))
+    return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_translate(args):
+    return _text(_trans.translate(args["text"],
+                                     target_lang=args.get("target_lang", "en")))
+
+
+def tool_argus_screenshot_history(args):
+    action = args["action"]
+    if action == "record":         return _text(_sh.record(args["path"], surface=args.get("surface")))
+    if action == "list":           return _text({"history": _sh.list_recent(int(args.get("limit", 20)))})
+    if action == "diff_last_two":  return _text(_sh.diff_last_two())
+    if action == "clear":          return _text(_sh.clear())
     return _text({"error": f"unknown action: {action}"})
 
 
