@@ -80,12 +80,14 @@ from core import (cascade, intent, router, vision, verify, session, repl,
                   contacts as _contacts, qr as _qr,
                   translate as _trans, screenshot_history as _sh,
                   summary as _summary, observe as _observe,
-                  browser_advanced as _badv)
+                  browser_advanced as _badv,
+                  log_search as _lsearch, skills_export as _sexport,
+                  help as _help)
 from adapters import ax, ocr, cdp, cdp_raw, cgevent
 
 PROTO_VERSION = "2024-11-05"
 SERVER_NAME = "argus"
-SERVER_VERSION = "2.1.0"
+SERVER_VERSION = "2.2.0"
 
 WORKFLOWS_DIR = os.path.join(ROOT, "app-skills", "workflows")
 
@@ -335,6 +337,33 @@ TOOLS = [
          "name": {"type": "string"},
          "kind": {"type": "string", "enum": ["auto", "native", "web"], "default": "auto"}
      }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_log_search",
+     "description": "Search intent.jsonl with text/regex query, optional time window, optional field filter (target/intent/scope/source/observation).",
+     "inputSchema": {"type": "object", "properties": {
+         "query": {"type": "string"},
+         "regex": {"type": "boolean", "default": False},
+         "since_hours": {"type": "number"},
+         "limit": {"type": "integer", "default": 50},
+         "field": {"type": "string"}
+     }, "required": ["query"], "additionalProperties": False}},
+
+    {"name": "argus_export_skills",
+     "description": "Export learned-cache + patterns as a JSON bundle (for community contribution to argus-skills registry). action ∈ {export, import}.",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string", "enum": ["export", "import"]},
+         "min_successes": {"type": "integer", "default": 5},
+         "scopes": {"type": "array", "items": {"type": "string"}},
+         "out_path": {"type": "string"},
+         "path": {"type": "string"},
+         "dry_run": {"type": "boolean", "default": False}
+     }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_help",
+     "description": "Searchable tool catalog — call without args for category list, or with topic for tools+examples in that category.",
+     "inputSchema": {"type": "object", "properties": {
+         "topic": {"type": "string"}
+     }, "additionalProperties": False}},
 
     {"name": "argus_cookies",
      "description": "Chrome cookies via CDP. action ∈ {get, set, clear}.",
@@ -1386,6 +1415,32 @@ def tool_argus_skills(args):
             return _text({"error": "name required"})
         return _text(registry.install(args["name"], kind=args.get("kind", "auto")))
     return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_log_search(args):
+    return _text(_lsearch.search(args["query"],
+                                    regex=bool(args.get("regex", False)),
+                                    since_hours=args.get("since_hours"),
+                                    limit=int(args.get("limit", 50)),
+                                    field=args.get("field")))
+
+
+def tool_argus_export_skills(args):
+    action = args["action"]
+    if action == "export":
+        return _text(_sexport.export(min_successes=int(args.get("min_successes", 5)),
+                                        scopes=args.get("scopes"),
+                                        out_path=args.get("out_path")))
+    if action == "import":
+        if not args.get("path"):
+            return _text({"error": "path required for import"})
+        return _text(_sexport.import_bundle(args["path"],
+                                               dry_run=bool(args.get("dry_run", False))))
+    return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_help(args):
+    return _text(_help.help(args.get("topic")))
 
 
 def tool_argus_cookies(args):
