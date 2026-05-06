@@ -78,12 +78,13 @@ from core import (cascade, intent, router, vision, verify, session, repl,
                   app_explore as _explore, redact as _redact, focus as _focus,
                   drag as _drag, system_ctl as _sys,
                   contacts as _contacts, qr as _qr,
-                  translate as _trans, screenshot_history as _sh)
+                  translate as _trans, screenshot_history as _sh,
+                  summary as _summary, observe as _observe)
 from adapters import ax, ocr, cdp, cdp_raw, cgevent
 
 PROTO_VERSION = "2024-11-05"
 SERVER_NAME = "argus"
-SERVER_VERSION = "1.9.0"
+SERVER_VERSION = "2.0.0"
 
 WORKFLOWS_DIR = os.path.join(ROOT, "app-skills", "workflows")
 
@@ -332,6 +333,22 @@ TOOLS = [
          "action": {"type": "string", "enum": ["index", "install", "list_local"]},
          "name": {"type": "string"},
          "kind": {"type": "string", "enum": ["auto", "native", "web"], "default": "auto"}
+     }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_summary",
+     "description": "1-line + structured snapshot: surface, frontmost app, top-3 tools, vision mode, cache size, last 5 ok intents.",
+     "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
+
+    {"name": "argus_observe",
+     "description": "Background watch for an event. action ∈ {start, stop, list}. kind ∈ {text_appears, state_changes, app_changes, http_endpoint}. Notifies via macOS notification + intent log.",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string", "enum": ["start", "stop", "list"]},
+         "name": {"type": "string"},
+         "kind": {"type": "string"},
+         "params": {"type": "object"},
+         "max_fires": {"type": "integer", "default": 5},
+         "timeout_s": {"type": "number", "default": 3600.0},
+         "interval_s": {"type": "number", "default": 2.0}
      }, "required": ["action"], "additionalProperties": False}},
 
     {"name": "argus_contacts",
@@ -1329,6 +1346,25 @@ def tool_argus_skills(args):
         if not args.get("name"):
             return _text({"error": "name required"})
         return _text(registry.install(args["name"], kind=args.get("kind", "auto")))
+    return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_summary(_):
+    return _text(_summary.summary())
+
+
+def tool_argus_observe(args):
+    action = args["action"]
+    if action == "start":
+        if not args.get("name") or not args.get("kind"):
+            return _text({"error": "name + kind required"})
+        return _text(_observe.start(args["name"], kind=args["kind"],
+                                       params=args.get("params"),
+                                       max_fires=int(args.get("max_fires", 5)),
+                                       timeout_s=float(args.get("timeout_s", 3600.0)),
+                                       interval_s=float(args.get("interval_s", 2.0))))
+    if action == "stop":   return _text(_observe.stop(args["name"]))
+    if action == "list":   return _text(_observe.list_watches())
     return _text({"error": f"unknown action: {action}"})
 
 
