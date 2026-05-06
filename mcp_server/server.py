@@ -61,12 +61,13 @@ from core import (cascade, intent, router, vision, verify, session, repl,
                   wizard, uninstall as _uninstall, chrome_admin, registry,
                   asyncio_runtime, extract, safety, secure_session,
                   replay as _replay, workflow as _workflow,
-                  apple_apps, diff_screens, macros)
+                  apple_apps, diff_screens, macros,
+                  benchmark, health)
 from adapters import ax, ocr, cdp, cdp_raw, cgevent
 
 PROTO_VERSION = "2024-11-05"
 SERVER_NAME = "argus"
-SERVER_VERSION = "0.8.0"
+SERVER_VERSION = "0.9.0"
 
 WORKFLOWS_DIR = os.path.join(ROOT, "app-skills", "workflows")
 
@@ -316,6 +317,33 @@ TOOLS = [
          "name": {"type": "string"},
          "kind": {"type": "string", "enum": ["auto", "native", "web"], "default": "auto"}
      }, "required": ["action"], "additionalProperties": False}},
+
+    {"name": "argus_benchmark",
+     "description": "Run a perf suite (router, AX, OCR, CDP, vision, screencapture, cache). Returns p50/p95/avg/stdev per op.",
+     "inputSchema": {"type": "object", "properties": {
+         "iterations": {"type": "integer", "default": 10}
+     }, "additionalProperties": False}},
+
+    {"name": "argus_health",
+     "description": "Continuous health monitor. action ∈ {start, stop, status}. Logs DEGRADED/BROKEN transitions to intent.jsonl.",
+     "inputSchema": {"type": "object", "properties": {
+         "action": {"type": "string", "enum": ["start", "stop", "status"], "default": "status"},
+         "interval_s": {"type": "number", "default": 60}
+     }, "additionalProperties": False}},
+
+    {"name": "argus_dom_query",
+     "description": "Direct CDP DOM query (browser only). Returns matched elements with text, bbox, attrs. For agents that prefer DOM over vision.",
+     "inputSchema": {"type": "object", "properties": {
+         "selector": {"type": "string"},
+         "max_results": {"type": "integer", "default": 50},
+         "attrs": {"type": "array", "items": {"type": "string"}}
+     }, "required": ["selector"], "additionalProperties": False}},
+
+    {"name": "argus_install_log_rotation",
+     "description": "Install launchd agent that runs argus_log_rotate nightly. Optional hour (24h, default 3 = 3am).",
+     "inputSchema": {"type": "object", "properties": {
+         "hour": {"type": "integer", "default": 3, "minimum": 0, "maximum": 23}
+     }, "additionalProperties": False}},
 
     {"name": "argus_macros",
      "description": "Built-in micro-workflows. action ∈ {list, run}. run macro_name='save'|'undo'|'new_tab'|'spotlight'|... Pre-baked common UI gestures.",
@@ -952,6 +980,29 @@ def tool_argus_skills(args):
             return _text({"error": "name required"})
         return _text(registry.install(args["name"], kind=args.get("kind", "auto")))
     return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_benchmark(args):
+    return _text(benchmark.run(iterations=int(args.get("iterations", 10))))
+
+
+def tool_argus_health(args):
+    action = args.get("action", "status")
+    if action == "start":  return _text(health.start(float(args.get("interval_s", 60))))
+    if action == "stop":   return _text(health.stop())
+    if action == "status": return _text(health.status())
+    return _text({"error": f"unknown action: {action}"})
+
+
+def tool_argus_dom_query(args):
+    return _text({"selector": args["selector"],
+                  "results": cdp_raw.query_selector_all(args["selector"],
+                                                          attrs=args.get("attrs"),
+                                                          max_results=int(args.get("max_results", 50)))})
+
+
+def tool_argus_install_log_rotation(args):
+    return _text(safety.install_log_rotation_agent(hour=int(args.get("hour", 3))))
 
 
 def tool_argus_macros(args):

@@ -257,6 +257,49 @@ def find(target: str) -> Optional[dict]:
     return res
 
 
+def query_selector_all(selector: str, *, attrs: list | None = None,
+                        max_results: int = 100) -> list[dict]:
+    """document.querySelectorAll(selector) → list of {text, bbox, attrs}.
+
+    `attrs`: list of attribute names to include in each result (default:
+    ['id', 'class', 'href', 'aria-label', 'role']).
+    """
+    if not HAVE_WS:
+        return []
+    attrs = attrs or ["id", "class", "href", "aria-label", "role", "data-testid"]
+    js = """
+    (function(sel, attrs, max) {
+      const out = [];
+      try {
+        const els = document.querySelectorAll(sel);
+        for (let i = 0; i < els.length && out.length < max; i++) {
+          const el = els[i];
+          const r = el.getBoundingClientRect();
+          const item = {
+            text: (el.innerText || el.value || '').trim().slice(0, 200),
+            bbox: [r.left, r.top, r.width, r.height],
+            tag: el.tagName.toLowerCase(),
+            visible: r.width > 0 && r.height > 0,
+            attrs: {},
+          };
+          for (const a of attrs) {
+            const v = el.getAttribute ? el.getAttribute(a) : null;
+            if (v != null) item.attrs[a] = v;
+          }
+          out.push(item);
+        }
+      } catch (e) {
+        return {error: String(e)};
+      }
+      return out;
+    })(%s, %s, %d)
+    """ % (json.dumps(selector), json.dumps(attrs), int(max_results))
+    res = evaluate(js)
+    if isinstance(res, dict) and res.get("error"):
+        return []
+    return res if isinstance(res, list) else []
+
+
 def doctor() -> dict:
     if not HAVE_WS:
         return {"available": False, "error": _ERR,

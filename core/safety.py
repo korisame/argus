@@ -157,6 +157,51 @@ def _flush_batch(screenshot_path: str, find_fn) -> None:
     entry["event"].set()
 
 
+LAUNCHD_LABEL_ROTATE = "ai.argus.log_rotate"
+LAUNCHD_PLIST_ROTATE = Path(os.path.expanduser(
+    "~/Library/LaunchAgents/ai.argus.log_rotate.plist"))
+
+
+def install_log_rotation_agent(hour: int = 3) -> dict:
+    """Install a launchd agent that runs argus_log_rotate nightly at HH:00."""
+    py = (subprocess.run(["which", "python3"], capture_output=True, text=True).stdout.strip()
+          or "/usr/bin/python3")
+    script = f"""import sys; sys.path.insert(0, "{os.path.dirname(os.path.dirname(os.path.abspath(__file__)))}");
+from core.safety import rotate_logs; import json; print(json.dumps(rotate_logs()))"""
+    out = (Path.home() / ".argus-prime" / "rotate_logs.py")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(script)
+    plist = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>{LAUNCHD_LABEL_ROTATE}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{py}</string>
+    <string>{out}</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>{hour}</integer>
+    <key>Minute</key><integer>0</integer>
+  </dict>
+  <key>StandardOutPath</key><string>{Path.home() / '.argus-prime' / 'rotate.log'}</string>
+  <key>StandardErrorPath</key><string>{Path.home() / '.argus-prime' / 'rotate.err'}</string>
+</dict>
+</plist>
+"""
+    LAUNCHD_PLIST_ROTATE.parent.mkdir(parents=True, exist_ok=True)
+    LAUNCHD_PLIST_ROTATE.write_text(plist)
+    # load it (idempotent: unload first, ignore errors)
+    subprocess.run(["launchctl", "unload", str(LAUNCHD_PLIST_ROTATE)],
+                   capture_output=True, timeout=5)
+    r = subprocess.run(["launchctl", "load", "-w", str(LAUNCHD_PLIST_ROTATE)],
+                       capture_output=True, text=True, timeout=5)
+    return {"ok": r.returncode == 0, "plist": str(LAUNCHD_PLIST_ROTATE),
+            "hour": hour, "stderr": (r.stderr or "").strip()}
+
+
 def vision_find_batched(target: str, screenshot_path: str, find_fn) -> Optional[dict]:
     """Coalesce concurrent finds on the same screenshot into a single batch."""
     with _BATCH_LOCK:
